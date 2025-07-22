@@ -4,23 +4,27 @@ Created on Wed Jun 11 11:17:53 2025
 
 @author: AndrewMiller
 """
+import sys
+sys.path.append(r'C:\Users\AndrewMiller\OneDrive - Global Health Labs, Inc\Desktop\roboclaw_python')
+import roboclaw_3 as roboclaw
+from roboclaw import Roboclaw
+import math
+import config # https://docs.python.org/3/faq/programming.html#how-do-i-share-global-variables-across-modules
+
+#All target/location variables are in degrees and convereted to counts for interacting with the motors
 
 def telescope_control(queues):
-    import math
-    import config # https://docs.python.org/3/faq/programming.html#how-do-i-share-global-variables-across-modules
 
     
     #Start new thread for this with queue to put in commanded positions and return current state
     #this is a consumer of the telescope queue
-    import sys
-    sys.path.append(r'C:\Users\AndrewMiller\OneDrive - Global Health Labs, Inc\Desktop\roboclaw_python')
-    import roboclaw_3 as roboclaw
-    from roboclaw import Roboclaw
 
-    az_counts_per_rev = 1000
-    el_counts_per_rev = 1000
-    az_backlash = 100
-    el_backlash = 100
+
+    deadband_counts = 10
+    az_counts_per_rev = 10000
+    el_counts_per_rev = 10000
+    az_backlash = 66
+    el_backlash = 66
     Bit1_az = 0 #testing only
     Bit1_el = 0 #testing only
     stats = {'test':'test'}
@@ -79,8 +83,8 @@ def telescope_control(queues):
     
     
         
-    az_encoder_value = 0
-    el_encoder_value = 0 #replace with read function
+    az_encoder_value = 0 #counts, replace with read function
+    el_encoder_value = 0 #counts, replace with read function
     
     #queue commands
     run = True #send the command to the controller
@@ -88,12 +92,14 @@ def telescope_control(queues):
     status_q = queues['status_q']
 
     while not config.end_program:
+        ###### Begin status updates
+
+        
         #read state
         # az_encoder_value = rc.ReadEncM1(address)
         # el_encoder_value = rc.ReadEncM2(address)
         # az_speed = rc.ReadSpeedM1(address)
         # el_speed = rc.ReadSpeedM2(address)
-        
         
         
         
@@ -118,15 +124,24 @@ def telescope_control(queues):
         
         
         #pull queue
-        queue_cmd = telescope_q.get()
+        try:
+            queue_cmd = telescope_q.get(timeout = 10) #can never be filled if e.g. sun pointing or other keep out not met
+            #debug print('1 received cmd az ' + str(queue_cmd['az']) + ' el ' + str(queue_cmd['el']) + ' in deg')
+
+            az_dest_counts = queue_cmd['az'] * az_counts_per_rev / 360 #this will always be 0-360 degrees from the trajectory planner
+            el_dest_counts = queue_cmd['el'] * el_counts_per_rev / 360 #this will always be 0-180 degrees from the trajectory planner
+            cmd = queue_cmd['cmd']
+            #debug print('2 az_dest_counts ' + str(az_dest_counts) + ' el_dest_counts ' + str(el_dest_counts) )
+            
+        except Exception as e:
+            print('Exception in telescope queue pulling')
+            print(e)
+            cmd = 'hold'
         
-        az_dest = queue_cmd['az']#this will always be 0-360 degrees (in counts) from the trajectory planner
-        el_dest = queue_cmd['el'] #this will always be 0-180 degrees (in counts) from the trajectory planner
+        ###### End status updates
+            
         
-        cmd = queue_cmd['cmd']
-        
-        print('received cmd ' + cmd + ' az ' + str(az_dest) + ' el ' + str(el_dest))
-        
+        ###### Begin command processing
         if cmd == 'home_motors':
             print('homing motors')
             #Home motors
@@ -140,17 +155,17 @@ def telescope_control(queues):
             
             #determine right direction to move from current position (don't take long path around circle)    
             #don't forget about cable wrap limits!!
-            positive_move = (az_dest - az_encoder_value + az_counts_per_rev) % az_counts_per_rev
+            positive_move = (az_dest_counts - az_encoder_value + az_counts_per_rev) % az_counts_per_rev
             if positive_move < (az_counts_per_rev/2):
                 #go past the wrap around point
                 az = az_encoder_value + positive_move
                 new_az_dir = 1
             else:
                 #negative move
-                az =  az_counts_per_rev*math.floor(az_encoder_value / az_counts_per_rev) + az_dest
+                az =  az_counts_per_rev*math.floor(az_encoder_value / az_counts_per_rev) + az_dest_counts
                 new_az_dir = -1
             #el can't wrap around so not an issue for it
-            if el_dest > el_encoder_value:
+            if el_dest_counts > el_encoder_value:
                 new_el_dir = 1
             else:
                 new_el_dir = -1
@@ -158,14 +173,14 @@ def telescope_control(queues):
             #include backlash if reversing any axis
             if new_az_dir != old_az_dir:
                 #include backlash
-                az_dest = az_dest + new_az_dir*az_backlash #            need right direction
+                az_dest_counts = az_dest_counts + new_az_dir*az_backlash #            need right direction
             if new_el_dir != old_el_dir:
                 #include backlash
-                el_dest = el_dest + new_el_dir*el_backlash #            need right direction
+                el_dest_counts = el_dest_counts + new_el_dir*el_backlash #            need right direction
             
         elif cmd == 'hold': #stop and maintain current position
-            az_dest = az_encoder_value
-            el_dest = el_encoder_value
+            az_dest_counts = az_encoder_value
+            el_dest_counts = el_encoder_value
             
         elif cmd == 'status':
             print('status only')
@@ -238,6 +253,10 @@ def telescope_control(queues):
             print('command not recognized')
             output_str = output_str + '\n' + 'command not recognized'
     
+        ###### End command processing
+        
+        ###### Begin checks and issue motor drive commands
+    
         #do every time tasks
         #encoder runaway check
         #need to account for big slews onto target
@@ -245,46 +264,64 @@ def telescope_control(queues):
             #don't enable check until tracking?
             #only start if encoder counts not changing?
                 #if encoder value not changing more than n between reads && motor current > some threshold
-        n = 100
-        if az_encoder_value < az_dest + n: #shut down:
-            #run = False
-            output_str = output_str + '\n' + 'encoder runaway on az'
-        if el_encoder_value < el_dest + n: #shut down:
-            #run = False
-            output_str = output_str + '\n' + 'encoder runaway on el'
-
+        # n = 100
+        # if az_encoder_value < az_dest + n: #shut down:
+        #     #run = False
+        #     output_str = output_str + '\n' + 'encoder runaway on az'
+        # if el_encoder_value < el_dest + n: #shut down:
+        #     #run = False
+        #     output_str = output_str + '\n' + 'encoder runaway on el'
+            
+        try:
+            #check if we are where we are supposed to be close enough
+            if abs(az_dest_counts - az_encoder_value) < 360*deadband_counts/az_counts_per_rev:
+                config.az_in_position = True
+            else:
+                config.az_in_position = False
+            if abs(el_dest_counts - el_encoder_value) < 360*deadband_counts/el_counts_per_rev:
+                config.el_in_position = True
+            else:
+                config.el_in_position = False
+        except Exception as e:
+            print('No destination found for telescope control to slew to!')
+            print(e)
+                
     
         if run:
             #send the new command destinations
-            print('setM1speedacceldecelpos sent')
+            #print('setM1speedacceldecelpos sent')
             #setM1speedacceldecelpos()
             #setM2speedacceldecelpos()
             
-            #testing start
-            if az_dest > az_encoder_value:
-                az_encoder_value = az_encoder_value + 10
+            #testing start (virtual controller)
+            if az_dest_counts > az_encoder_value:
+                az_encoder_value = az_encoder_value + 50
                 Bit1_az = 0
-            elif az_dest < az_encoder_value:
-                az_encoder_value = az_encoder_value - 10
+            elif az_dest_counts < az_encoder_value:
+                az_encoder_value = az_encoder_value - 50
                 Bit1_az = 1
 
             else:
                 continue #already in location
                 
-            if el_dest > el_encoder_value:
-                el_encoder_value = el_encoder_value + 10
+            if el_dest_counts > el_encoder_value:
+                el_encoder_value = el_encoder_value + 50
                 Bit1_el = 0
-            elif el_dest < el_encoder_value:
-                el_encoder_value = el_encoder_value - 10
+            elif el_dest_counts < el_encoder_value:
+                el_encoder_value = el_encoder_value - 50
                 Bit1_el = 1
             else:
                 continue #already in location
             output_str = output_str + str(Bit1_az) + ' '  + str(Bit1_el)
-            print('Az current ' + str(az_encoder_value) + ' El current ' + str(el_encoder_value))
+            #debug print('3 Az current ' + str(az_encoder_value) + ' Az dest ' + str(az_dest_counts) + ' El current ' + str(el_encoder_value) + ' El dest ' + str(el_dest_counts))
             #testing end
+            
+        ###### End checks and motor drive commands
     
         #return status
             #include queue length to make sure not backing up
         status_q.put({'stats':stats, 'output':output_str})
+        #print('Finished telescope loop, continuing')
 
+    print('Terminated satellite tracking thread')
 

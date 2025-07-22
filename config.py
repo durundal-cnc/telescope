@@ -8,5 +8,8 @@ Created on Fri Jun 13 11:29:37 2025
 end_program = False #tells threads to exit
 az_angle = 0
 el_angle = 0
+az_in_position = False
+el_in_potiion = False
 camera_ready = False
 x = 0 #use for quit debugging
+image = ''

@@ -4,11 +4,12 @@ Created on Thu Jun 12 09:58:25 2025
 
 @author: AndrewMiller
 """
+from PIL import Image
+import os
+import config # https://docs.python.org/3/faq/programming.html#how-do-i-share-global-variables-across-modules
 
 def image_save(queues):
-    from PIL import Image
-    import os
-    import config # https://docs.python.org/3/faq/programming.html#how-do-i-share-global-variables-across-modules
+
     savepath = r'C:\Users\AndrewMiller\Telescope\images'
     print('Starting image_save thread')
     

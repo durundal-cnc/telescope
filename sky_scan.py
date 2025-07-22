@@ -14,6 +14,13 @@ import math
 from threading import Thread
 import queue
 import sys
+import os
+import csv
+import statistics
+import pandas as pd
+import zipfile
+import shutil
+
 sys.path.append(r'C:\Users\AndrewMiller\OneDrive - Global Health Labs, Inc\Desktop')
 
 #my functions
@@ -23,26 +30,86 @@ from camera_control import camera_control #takes photos
 from image_save import image_save #saves photos
 import tracking_modes #library of different pointing modes
 
+#tool to align telescope images for stitching: https://astroalign.quatrope.org/en/latest/
+
+def import_iphone_data(): #get location and orientation data from phone airdrop of CSV sensor logs
+    #https://github.com/seemoo-lab/opendrop
+    #and
+    #https://www.tszheichoi.com/sensorlogger
+    #get zip file via airdrop
+    
+    
+    #unpack zip
+    zip_file_loc = r'C:\Users\AndrewMiller\Downloads\14360_SE_Eastgate_Way-2025-07-18_17-03-55.zip'
+    with zipfile.ZipFile(zip_file_loc, 'r') as zip_ref:
+        unzip_dir = os.path.join(os.path.dirname(zip_file_loc),'iPhone_metadata')
+        if os.path.exists(unzip_dir):
+            shutil.rmtree(unzip_dir)
+        os.mkdir(unzip_dir)
+        zip_ref.extractall(unzip_dir)
+    
+    #import files
+    sensor_files = r'C:\Users\AndrewMiller\Downloads\14360_SE_Eastgate_Way-2025-07-18_17-03-55'
+    files = [ name for name in os.listdir(sensor_files) if name[-4:] == '.csv' ]
+    return_dict = {}
+    for file in files:
+        print('loading ' + file)
+        if file == 'Compass.csv':
+            #get stats on recorded values
+            df = pd.read_csv(os.path.join(sensor_files,file))
+            return_dict['compass'] = drop_outliers(df['magneticBearing'])
+        if file == 'Location.csv':
+            df = pd.read_csv(os.path.join(sensor_files,file))
+            return_dict['altitude'] = drop_outliers(df['altitude']) #also altitudeAboveMeanSeaLevel
+            return_dict['latitude'] = drop_outliers(df['latitude'])
+            return_dict['longitude'] = drop_outliers(df['longitude'])
+    return return_dict
+
+def drop_outliers(input_list,num_stddevs=1):
+    stddev = statistics.stdev(input_list)
+    mean = statistics.mean(input_list)
+    less_outliers = [item for item in input_list if item <= mean+num_stddevs*stddev or item >= mean-num_stddevs*stddev]
+    avg_less_outliers = statistics.mean(less_outliers)
+    print('dropped ' + str(len(input_list)-len(less_outliers)))
+    return avg_less_outliers
+
+
+#mount calibration
+#goto given star, pick it out of an image, get error from predicted / actual based on deg/pixel in the image, repeat?
+#or implement feature tracking in images
+
+#make list of in-view satellites from location and list in/out view times for them as pre-processor to select targets
+
 
 config.end_program = False #reset globals for each run
 config.az_angle = 0
 config.el_angle = 0
+config.az_in_position = False
+config.el_in_potiion = False
 config.camera_ready = False
 config.x = 0 #use for quit debugging
 
 #observation location details
 #input location of observation
-lat = 47.6205 #degrees
-long = -122.3493 #degrees
-altitude = 100 #meters
-compass_dir = 0.000 #degrees, magnetic angle from 0 az on telescope to magnetic north
+#lat = 47.6205 #degrees
+#long = -122.3493 #degrees
+#altitude = 100 #meters, I think this is all WGS ellipsoid referenced but needs checking
+#compass_dir = 0.000 #degrees, magnetic angle from 0 az on telescope to magnetic north
+
+iphone = import_iphone_data()
+lat = iphone['latitude']
+long = iphone['longitude']
+altitude = iphone['altitude']
+compass_dir = iphone['compass']
+
+
 #compute magnetic declination 
 geo_mag = GeoMag(coefficients_file="wmm/WMM_2025.COF")
 telescope_time = datetime.now(timezone.utc) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
 mag_declination = geo_mag.calculate(glat=lat, glon=long, alt=altitude/1000, time=telescope_time.year+int(telescope_time.strftime('%j'))/1000) #altitude in km for geo_mag
 #print('Magnetic declination: ' + str(mag_declination.d))
-target_name = 'M33'
-mode = 'astronomy'
+target_name = 'SDO' #'M33' 'sun' 'moon
+mode = 'satellite_tracking' #point and shoot, satellite tracking
 camera_period = 10 #how many seconds between shots
 
 my_locs = {'EarthLocation':EarthLocation(lat=lat * u.deg, lon = long * u.deg, height = altitude * u.m), 'compass_dir':compass_dir, 'mag_declination':mag_declination}
@@ -52,7 +119,7 @@ my_locs = {'EarthLocation':EarthLocation(lat=lat * u.deg, lon = long * u.deg, he
 funct_dict = {
     "point_and_shoot": tracking_modes.point_and_shoot,
     "astronomy": tracking_modes.astronomy,
-  #  "tracking": tracking_modes.tracking
+    "satellite_tracking": tracking_modes.satellite_tracking
 }
 
 camera_q = queue.Queue() #queue for taking a photo
@@ -79,6 +146,21 @@ producer = Thread(target=funct_dict[mode], args=(my_locs, queues, target_name, c
 producer.start()
 
 print('All threads started')
+statuses = []
+time = Time.now()
+
+while not config.end_program:
+    size = queues['status_q'].qsize() #check that an image is in the queue
+    if size >= 1:
+        #get status_q and display message
+        status = status_q.get()
+        statuses.append(status)
+        #print(status)
+    #sleep(1)
+    if Time.now() > time + timedelta(seconds = 60):
+        config.end_program = True
+#    else:
+#        print('End conditions: ' + str(size) + ' ' + str((time + timedelta(seconds = 20)-Time.now()).sec) + ' s remaining')
 
 # wait for all threads to finish
 producer.join()
@@ -87,6 +169,7 @@ consumer_image_save.join()
 consumer_camera.join()
 
 print('All threads finished')
+
 
 # def point_and_shoot():
 #     pass
