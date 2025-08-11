@@ -13,3 +13,11 @@ el_in_potiion = False
 camera_ready = False
 x = 0 #use for quit debugging
 image = ''
+tracking_ready = False
+camera_process_ready = False
+image_process_ready = False
+telescope_process_ready = False
+coordinates = []
+
+az_current = 0
+el_current = 0

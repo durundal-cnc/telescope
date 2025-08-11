@@ -19,7 +19,8 @@ def camera_control(queues):
     
 
     while not config.end_program:
-            
+        config.camera_process_ready = True #signal loop is ready
+        
         size = queues['camera_q'].qsize()
         if size >= 1:
             print('taking image')
@@ -28,21 +29,21 @@ def camera_control(queues):
             #pull item from queue
             camera = queues['camera_q'].get(block=False)
             
-            #unpack camera parameters (to be implemented)
-            #image = take picture
-            #fake image for testing
-            path = r'C:\Users\AndrewMiller\Telescope\dishwasher-mustard.png'
-            image =Image.open(path)
-            #image = config.image
+            # #unpack camera parameters (to be implemented)
+            # #image = take picture
+            # #fake image for testing
+            # path = r'C:\Users\AndrewMiller\Telescope\dishwasher-mustard.png'
+            # image =Image.open(path)
+            # #image = config.image
            
 
-            #date and coordinates as filename
+            # #date and coordinates as filename
             
-            t = datetime.datetime.now()
-            filename = t.strftime('%Y-%m-%d %H_%M_%S.%f') + camera
-            img = {'img':image, 'filename':filename+'.jpg'}
+            # t = datetime.datetime.now()
+            # filename = t.strftime('%Y-%m-%d %H_%M_%S.%f') + camera
+            # img = {'img':image, 'filename':filename+'.jpg'}
             
-            queues['image_save_q'].put(img, block=False)   #put picture into image processor queue along with filename
+            # queues['image_save_q'].put(img, block=False)   #put picture into image processor queue along with filename
     
             config.camera_ready = True
             print('camera done taking image')

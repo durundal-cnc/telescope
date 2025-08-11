@@ -87,7 +87,16 @@ config.el_angle = 0
 config.az_in_position = False
 config.el_in_potiion = False
 config.camera_ready = False
+config.tracking_ready = False
+config.camera_process_ready = False
+config.image_process_ready = False
+config.telescope_process_ready = False
+config.coordinates = []
+
+
+
 config.x = 0 #use for quit debugging
+
 
 #observation location details
 #input location of observation
@@ -108,8 +117,8 @@ geo_mag = GeoMag(coefficients_file="wmm/WMM_2025.COF")
 telescope_time = datetime.now(timezone.utc) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
 mag_declination = geo_mag.calculate(glat=lat, glon=long, alt=altitude/1000, time=telescope_time.year+int(telescope_time.strftime('%j'))/1000) #altitude in km for geo_mag
 #print('Magnetic declination: ' + str(mag_declination.d))
-target_name = 'SDO' #'M33' 'sun' 'moon
-mode = 'satellite_tracking' #point and shoot, satellite tracking
+target_name = 'moon' #'M33' 'sun' 'moon 'SDO'
+mode = 'satellite_tracking' #point and shoot, satellite tracking, astronomy
 camera_period = 10 #how many seconds between shots
 
 my_locs = {'EarthLocation':EarthLocation(lat=lat * u.deg, lon = long * u.deg, height = altitude * u.m), 'compass_dir':compass_dir, 'mag_declination':mag_declination}
@@ -129,27 +138,44 @@ status_q = queue.Queue() #queue to return status items
 
 queues = {'camera_q':camera_q, 'image_save_q':image_save_q, 'telescope_q':telescope_q, 'status_q':status_q}
 
+#figure out max command rate roboclaw can receive, build table of locations to spit out at that rate (vice real-time computations)
 
 
-# start the consumers
-consumer_camera = Thread(target=camera_control, args=(queues,)) #You need to add a comma to create a tuple, so it would be args=(item,):
-consumer_camera.start()
+# # start the consumers
+# consumer_camera = Thread(target=camera_control, args=(queues,)) #You need to add a comma to create a tuple, so it would be args=(item,):
+# consumer_camera.start()
+# while not config.camera_process_ready:
+#     pass
+# print('consumer_camera started')
 
-consumer_image_save = Thread(target=image_save, args=(queues,))
-consumer_image_save.start()
+
+# consumer_image_save = Thread(target=image_save, args=(queues,))
+# consumer_image_save.start()
+# while not config.image_process_ready:
+#     pass
+# print('consumer_image_save started')
+
+# start the producer
+thread_tracker = Thread(target=funct_dict[mode], args=(my_locs, queues, target_name, camera_period)) #runs the mode in tracking_modes.py
+thread_tracker.start()
+while not config.tracking_ready:
+    pass
+print('thread_tracker started')
 
 consumer_telescope = Thread(target=telescope_control, args=(queues,))
 consumer_telescope.start()
-
-# start the producer
-producer = Thread(target=funct_dict[mode], args=(my_locs, queues, target_name, camera_period)) #runs the mode in tracking_modes.py
-producer.start()
+while not config.telescope_process_ready:
+    pass
+print('consumer_telescope started')
 
 print('All threads started')
 statuses = []
 time = Time.now()
 
+x = 1
 while not config.end_program:
+    x=x+1
+    print(x)
     size = queues['status_q'].qsize() #check that an image is in the queue
     if size >= 1:
         #get status_q and display message
@@ -157,19 +183,34 @@ while not config.end_program:
         statuses.append(status)
         #print(status)
     #sleep(1)
+    #keyboard = input()
     if Time.now() > time + timedelta(seconds = 60):
         config.end_program = True
+        print('ending program due to timer')
+    keyboard = ''
+    if keyboard == 'q': #Time.now() > time + timedelta(seconds = 240):
+        config.end_program = True
+        print('ending program due to keyboard input')
+    elif keyboard == 'az':
+        print(config.az_angle)
+    elif keyboard == 'el':
+        print(config.el_angle)   
 #    else:
 #        print('End conditions: ' + str(size) + ' ' + str((time + timedelta(seconds = 20)-Time.now()).sec) + ' s remaining')
 
 # wait for all threads to finish
-producer.join()
+thread_tracker.join()
+print('thread_tracker join() complete')
 consumer_telescope.join()
-consumer_image_save.join()
-consumer_camera.join()
+print('consumer_telescope join() complete')
+# consumer_image_save.join()
+# print('consumer_image_save join() complete')
+# consumer_camera.join()
+# print('consumer_camera join() complete')
+
 
 print('All threads finished')
-
+y = [j - i for i,j in zip(config.x[:-1], config.x[1:])]
 
 # def point_and_shoot():
 #     pass

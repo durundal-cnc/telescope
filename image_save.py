@@ -14,6 +14,8 @@ def image_save(queues):
     print('Starting image_save thread')
     
     while not config.end_program:
+        config.image_process_ready = True #signal loop is ready
+        
         size = queues['image_save_q'].qsize() #check that an image is in the queue
         if size >= 1:
             img_q = queues['image_save_q'].get(block=False) 

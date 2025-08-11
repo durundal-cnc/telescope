@@ -26,6 +26,7 @@ from spacetrack import SpaceTrackClient #this pulls the TLE from a satellite dat
 #aim at [center or top left] and raster scan as described
 def point_and_shoot(my_loc, queues, FOV = 1, az_steps = 10, el_steps = 5): #units degrees
 
+    config.tracking_ready = True # signal that the tracker is now producing tracking coordinates
 
     
     print('Starting point and shoot thread')
@@ -87,6 +88,8 @@ def astronomy(my_locs, queues, target_name = 'moon', camera_period = 10):
     
     
     while not config.end_program:
+            config.tracking_ready = True # signal that the tracker is now producing tracking coordinates
+
    #     if     datetime.now(timezone.utc) > time_old + timedelta(0,5): #rate limiter, remove after testing
 
             #https://docs.astropy.org/en/latest/coordinates/example_gallery_plot_obs_planning.html
@@ -131,7 +134,7 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
     timing = []
 
         
-    def get_az_el(t = Time.now()):
+    def get_az_el(t):
     
         t.format = 'jd' #SGP4 input is julian days and fractional days
         error_code, teme_p, teme_v = satellite.sgp4(t.jd1, t.jd2)  # in km and km/s
@@ -199,6 +202,7 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
     set_time = t
     t.format = 'isot'
     print('Set time: ' + t.value)
+    set_time = set_time.datetime #astropy Time class slow, avoid using
         
     t = Time.now()
     for secs in [1000, 100, 10, 1]:
@@ -212,43 +216,52 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
     rise_time = t
     t.format = 'isot'
     print('Rise time: ' + t.value)  
-    
+    rise_time = rise_time.datetime #astropy Time class slow, avoid using
+
     
         
-    time_old = datetime.now(timezone.utc)
-    time_print = datetime.now(timezone.utc)
+    time_old = datetime.now()
+    time_print = datetime.now()
     
     while not config.end_program:
-        timing.append(datetime.now(timezone.utc))
-        aa = get_az_el()
+        config.tracking_ready = True # signal that the tracker is now producing tracking coordinates
+        
+        timing.append(datetime.now())
+        aa = get_az_el(Time.now())
 
         if aa.alt > 0:
-            time1 = Time.now()
+            time1 = datetime.now()
 
-            countdown = set_time - Time.now()
-            if datetime.now(timezone.utc) > time_print + timedelta(seconds=1):
-                print(countdown.quantity_str + ' until out of view')
-                time_print = datetime.now(timezone.utc)
+            countdown = set_time - datetime.now()
+            if datetime.now() > time_print + timedelta(seconds=10):
+                print(str(countdown.seconds) + '.' + str(countdown.microseconds) + 's until out of view')
+                print('current tracker generated angle az: ' + str(aa.az.deg) + ' el: ' + str(aa.alt.deg))
+
+                time_print = datetime.now()
 
             
 #            print('ITRS: ' + str(Time.now()) + ' ' + str(aa.alt) + ' ' + str(aa.az))
             #print('ITRS: ' + str(Time.now()) + ' ' + str(aa.alt.deg) + ' ' + str(aa.az.deg))
             
-            time1 = Time.now()
+            time1 = datetime.now()
             send_commands(my_locs, aa.az.deg, aa.alt.deg, queues['telescope_q'])
-            print((Time.now() - time1).quantity_str + ' send commands')
-
+            #don't use astropy Time print((datetime.now() - time1).quantity_str + ' send commands')
+#            print(str((datetime.now() - time1).seconds) + '.' + str((datetime.now() - time1).microseconds) + 's send commands')
             #print('deg az: ' + str(aa.az.deg) + ' deg el ' + str(aa.alt.deg))
 
-            if datetime.now(timezone.utc) > time_old + timedelta(seconds=camera_period): #check if time to take a photo
+            if datetime.now() > time_old + timedelta(seconds=camera_period): #check if time to take a photo
                 queues['camera_q'].put('az ' + str(aa.az.deg) + ' ' + 'el ' + str(aa.alt.deg),block=False)#take photo
-                time_old = datetime.now(timezone.utc)
-            print((Time.now() - time1).quantity_str + ' time to send')
+                time_old = datetime.now()
+            #don't use astropy Time print((datetime.now() - time1).quantity_str + ' time to send')
+#            print(str((datetime.now() - time1).seconds) + '.' + str((datetime.now() - time1).microseconds) + 's time to send')
 
         else:
-            countdown = Time.now() - rise_time
-            print(countdown.quantity_str + ' until in view')
-    print(timing)
+            countdown = datetime.now() - rise_time
+            #don't use astropy Time print(countdown.quantity_str + ' until in view')
+            print(str(countdown.seconds) + '.' + str(countdown.microseconds) + 's until in view')
+
+            pass
+    #print(timing)
     config.x = timing
     print('Terminated satellite tracking thread')
 
@@ -281,6 +294,9 @@ def send_commands(my_locs, az, el, telescope_q):
     sun_el = sunaltaz.alt.deg
     keep_out_radius = 5 #5 degree keep out radius to start
     
+    config.az_angle = az
+    config.el_angle = el
+    
     #Check if will point into sun
     if (az-sun_az)**2 + (el - sun_el)**2 < keep_out_radius**2:
         send_command = False
@@ -288,8 +304,9 @@ def send_commands(my_locs, az, el, telescope_q):
     
     
     if send_command:
-        #send_the_commands()
         telescope_q.put({'az':az, 'el':el, 'cmd':'move_az_el'}, block=False)
+        config.coordinates.append({'time':telescope_time, 'az':az, 'el':el, 'cmd':'move_az_el'})
+        #print('generated new angle az: ' + str(az) + ' el: ' + str(el))
     
     # config.x = config.x + 1
     # if config.x > 100:
