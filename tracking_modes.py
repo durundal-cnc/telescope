@@ -20,6 +20,7 @@ from astropy import units as u
 from astropy.coordinates import EarthLocation, AltAz, ITRS, TEME, CartesianDifferential, CartesianRepresentation,  SkyCoord, get_body, get_sun
 from spacetrack import SpaceTrackClient #this pulls the TLE from a satellite database
 
+import pandas as pd
  
         
 #point and shoot mode:
@@ -131,6 +132,35 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
     
     # from datetime import datetime, date, timezone, timedelta
     # from astropy.time import Time, TimeDelta, TimeDeltaSec
+
+    #load local copy of NORAD satellite list and find NORAD catid by name
+    norad = pd.read_csv(r'C:\Users\AndrewMiller\OneDrive - Global Health Labs, Inc\Desktop\satcat.csv')
+    #if target_name is only digits assume this is the NORAD catalog ID
+    print('Desired target name is ' + target_name)
+    if target_name.isdigit():
+        norad_cat_id = int(target_name)
+        print('Target name from NORAD catalog ID is ')
+        print(norad[['OBJECT_NAME', 'OBJECT_ID', 'NORAD_CAT_ID']].loc[norad['NORAD_CAT_ID']==(int(target_name))].to_string(index=False))
+
+    else:
+        name_matches = norad[norad['OBJECT_NAME'].str.contains(target_name)]
+        if len(name_matches) <1:
+            print('Could not find object. May be decayed or does not exist. If a celestial body, use astronomy mode instead of satellite tracking.')
+            #return
+        nondecay_matcheds = name_matches[~name_matches['OPS_STATUS_CODE'].str.contains('D')]
+        if len(nondecay_matcheds.index)>1:
+            print('Found multiple matches for target \'' + target_name + '\', please specify which and re-run.')
+            nondecay_matcheds = nondecay_matcheds[['OBJECT_NAME', 'OBJECT_ID', 'NORAD_CAT_ID']].reset_index(drop = True)
+            print(nondecay_matcheds.to_string(index=True))
+            val = input('Please enter desired index: ')
+            print('You have selected ')
+            print(nondecay_matcheds.iloc[int(val)].to_string())
+            norad_cat_id = int(nondecay_matcheds['NORAD_CAT_ID'].iloc[int(val)])
+
+        else:
+            print(nondecay_matcheds['NORAD_CAT_ID'])
+            norad_cat_id = int(nondecay_matcheds['NORAD_CAT_ID'])
+
     timing = []
 
         
@@ -147,41 +177,50 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
         teme_v = CartesianDifferential(teme_v*u.km/u.s)
         teme = TEME(teme_p.with_differentials(teme_v), obstime=t)
                 
-        # from astropy.coordinates import ITRS
         itrs_geo = teme.transform_to(ITRS(obstime=t))
         location = itrs_geo.earth_location
+        location.geodetic
+        
+        
+        # from astropy.coordinates import ITRS
+        itrs_geo = teme.transform_to(ITRS(obstime=t)) #location of object over earth in lat/long
+        location = itrs_geo.earth_location
+        #print(location.geodetic)
         
         # from astropy.coordinates import EarthLocation, AltAz
-        siding_spring = EarthLocation.of_site('aao')
-        siding_spring = my_locs['EarthLocation']
+        #siding_spring = EarthLocation.of_site('aao')
+        obs_location = my_locs['EarthLocation']
     
-        topo_itrs_repr = itrs_geo.cartesian.without_differentials() - siding_spring.get_itrs(t).cartesian
-        itrs_topo = ITRS(topo_itrs_repr, obstime = t, location=siding_spring)
-        aa = itrs_topo.transform_to(AltAz(obstime=t, location=siding_spring))
+        topo_itrs_repr = itrs_geo.cartesian.without_differentials() - obs_location.get_itrs(t).cartesian
+        itrs_topo = ITRS(topo_itrs_repr, obstime = t, location=obs_location)
+        aa = itrs_topo.transform_to(AltAz(obstime=t, location=obs_location))
         return aa
 
 
+
+
+
     # from spacetrack import SpaceTrackClient #this pulls the TLE from a satellite database
-    st = SpaceTrackClient('andymiller@gmail.com', 'spacetrackpassword')
-    print('Spacetrack: ')
-    print(st.gp(norad_cat_id=[25544, 41335], format='tle'))
+    try:
+        print('Connecting to Spacetrack')
+        st = SpaceTrackClient('andymiller@gmail.com', 'spacetrackpassword')
+        print('Spacetrack TLE: ')
+        #print(st.gp(norad_cat_id=[25544, 41335], format='tle')) #can get more than one TLE but not doing that here
+        x = st.gp(norad_cat_id=[norad_cat_id], format='tle')
+        s = x.splitlines()[0] #first line of two line ephemeris (TLE)
+        t = x.splitlines()[1] #second line of two line ephemeris (TLE)
+        print(x)
+    except Exception as e:
+        print(e)
+        print('Error loading object in SpaceTrack!')
+        #return
 #        TLE data for most spacecraft can be downloaded from https://www.space-track.org/
 #       Tracking map for TLE lookup: https://in-the-sky.org/satmap_radar.php?town=5809844
 # set time into the future, look for in view target, pull its info (implement lookup for single number input to grab TLE?), arm telescope which should sit until sat emerges above horizon
-    s = '1 25544U 98067A   19343.69339541  .00001764  00000-0  38792-4 0  9991' #first line of two line ephemeris (TLE)
-    t = '2 25544  51.6439 211.2001 0007417  17.6667  85.6398 15.50103472202482' #this is the ISS
-    s = '1 52335U 22045E   25168.14995947  .00001137  00000-0  89539-4 0  9991'
-    t = '2 52335  53.2181 321.1759 0001263  88.2138 271.8998 15.08840359175550'
-    s='1 52643U 22052AX  25167.82616276  .00002229  00000-0  15815-3 0  9998'
-    t='2 52643  53.2186  12.5999 0001438  95.1413 264.9743 15.08832272170990'
-    
-    s='1 53927U 22119AT  25168.31106461  .00085274  00000-0  14213-2 0  9994'
-    t='2 53927  53.1931  17.1406 0002427 115.7151 244.4110 15.51292049152018'
-    s = '1 36395U 10005A   25168.45492097 -.00000067  00000-0  00000+0 0  9997'
-    t = '2 36395  33.8852  91.9242 0000558  95.8239 140.0671  1.00270500 56373'
+
     
     satellite = Satrec.twoline2rv(s, t) #this converts the TLE into a track that can get fed into astropy to produce the position at a time and then get angles for that
-    
+    print('Satellite track computed, comparing in view times')
     #see if astroplan works better for this than DIY
     #get first point above horizon
         #advance time until it is above, then binary search between last time below and then?
@@ -191,79 +230,188 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
     
     #get the in view times
     t = Time.now()
-    for secs in [1000, 100, 10, 1]:
-        print('steps of ' + str(secs) +' seconds')
-        aa = get_az_el(t)
-        while (aa.alt >= 0): #get set time
-            t = t + TimeDelta(secs, format='sec')
-            aa = get_az_el(t)
-            print(aa.alt)
-        t = t - TimeDelta(secs, format='sec') #go back in time to the last position it was still up
-    set_time = t
     t.format = 'isot'
-    print('Set time: ' + t.value)
-    set_time = set_time.datetime #astropy Time class slow, avoid using
+    print('Current time:  ' + t.value)
+
+    aa = get_az_el(t)
+    if aa.alt<0: #object is currently below the horizon
+        print('Currently set')
         
-    t = Time.now()
-    for secs in [1000, 100, 10, 1]:
-        print('steps of ' + str(secs) +' seconds')
-        aa = get_az_el(t)
-        while (aa.alt <= 0): #get set time
-            t = t - TimeDelta(secs, format='sec')
+        t = Time.now()
+        for secs in [1000, 100, 10, 1, 0.1]: #find the object's rise time
+#            print('steps of ' + str(secs) +' seconds')
             aa = get_az_el(t)
-            print(aa.alt)
-        t = t - TimeDelta(secs, format='sec') #go back in time to the last position it was still up
-    rise_time = t
-    t.format = 'isot'
-    print('Rise time: ' + t.value)  
-    rise_time = rise_time.datetime #astropy Time class slow, avoid using
+            while (aa.alt <= 0): #get rise time
+                t = t + TimeDelta(secs, format='sec')
+                aa = get_az_el(t)
+#                print(aa.alt)
+            t = t - TimeDelta(secs, format='sec') #go back in time to the last position it was still up
+        rise_time = t
+        t.format = 'isot'
+        print('Rise time:     ' + t.value)
+        
+        #get the next set time for doing the trajectory calculations
+        t = rise_time + TimeDelta(10, format='sec') #shift so don't accidentally hit the transition time
+        for secs in [1000, 100, 10, 1, 0.1]: #find the object's rise time, this probably needs optimization to avoid edge cases?
+#            print('steps of ' + str(secs) +' seconds')
+            aa = get_az_el(t)
+            while (aa.alt >= 0): #get set time
+                t = t + TimeDelta(secs, format='sec')
+                aa = get_az_el(t)
+#                print(aa.alt)
+            t = t - TimeDelta(secs, format='sec') #go back in time to the last position it was still up
+        set_time = t
+        t.format='isot'
+        print('Next set time: ' + t.value)
+
+        
+        countdown = t-Time.now()
+        # while countdown>0:
+        countdown = t-Time.now()
+        countdown.format = 'sec'
+        countdown = countdown/60
+        print(str("%.2f" % countdown.value) + ' minutes until risen')
+            
+    else: #object is above the horizon, get the time it sets
+        rise_time = Time.now() #can't do stuff in the past so get calculations from current moment
+        print('currently above the horizon')
+        for secs in [1000, 100, 10, 1, 0.1]:
+#            print('steps of ' + str(secs) +' seconds')
+            aa = get_az_el(t)
+            while (aa.alt >= 0): #get set time
+                t = t + TimeDelta(secs, format='sec')
+                aa = get_az_el(t)
+#                print(aa.alt)
+            t = t - TimeDelta(secs, format='sec') #go back in time to the last position it was still up
+        set_time = t
+        t.format = 'isot'
+        print('Set time: ' + str(t.value))
+
+        countdown = t-Time.now()
+        countdown.format = 'sec'
+        countdown = countdown/60
+        print(str("%.2f" % countdown.value) + ' minutes until set')    
+##### End in view time calculations
+    rise_time = rise_time.to_datetime() #astropy Time class slow, avoid using
+    set_time = set_time.to_datetime()
+
+    rise_time = rise_time.replace(tzinfo=timezone.utc) #make UTC aware
+    set_time = set_time.replace(tzinfo=timezone.utc) #make UTC aware
+  
+######Bug noticed: when re-running without restarting kernel the in view times report the n+1 rise window rather than the next one
+#this might be if the rise is <1000 seconds away? Or if the 1000 sec step passes over an inview period based on its start point (I think this might be it)
+# if time in view is in 1100-1300 seconds and we check at 0, 1000, 2000 seconds it will clip it
 
     
+    ####### add yes/no check if in view time not in next 5 minutes (wait or try new target)
+    config.coordinates = []
+    t = rise_time
+    timespacing = 1
+    my_loc = config.my_locs['EarthLocation']
+    compass_dir = config.my_locs['compass_dir']   
+    mag_declination = config.my_locs['mag_declination']
+
+    coordinates = []
+    while t < set_time:
+        #get az-el and time
+        aa = get_az_el(Time(t))
         
-    time_old = datetime.now()
-    time_print = datetime.now()
+        sun = get_body("sun", Time(t), location = my_loc)
+        sunaltaz = sun.transform_to(AltAz(obstime=t, location=my_loc))
+        sun_az = sunaltaz.az.deg + compass_dir + mag_declination.d
+        sun_el = sunaltaz.alt.deg
+        
+        coordinates.append({'az':aa.az.deg, 'el':aa.alt.deg, 'sun_az':sun_az, 'sun_el':sun_el, 'time':t})
+        t = t + timedelta(seconds=timespacing)
+    config.coordinates = coordinates #store in shared variable
+
+    print('Completed trajectory calculations')
+    mins= int((set_time - rise_time).seconds/60)
+    secs = (set_time - rise_time).seconds
+    print('In view time: ' + str(secs) +' seconds (' + str(mins) + ' min ' + str(secs-(60*mins)) + ' sec)')
     
-    while not config.end_program:
+
+    
+    #check that the sun won't end up in the trajectory
+    keep_out = []
+    keep_out_angle = 5
+    print('Check for sun angle intrusions and write to file for reference')
+    with open(r'C:\Users\AndrewMiller\OneDrive - Global Health Labs, Inc\Desktop\track.txt', 'w') as f:
+
+        for line in config.coordinates:
+            f.write("%s\n" % line)     #save to file for review
+            if abs(line['az']-line['sun_az'])<keep_out_angle and abs(line['el']-line['sun_el'])<keep_out_angle:
+                print('Warning: trajectory approaches sun keep out: sun at ' + str(line['sun_az']) + ',' + str(line['sun_el']) + ' track at ' + str(line['az']) +','+str(line['el']))
+                keep_out.append(line)
+        print('Done writing to file')
+
+    if len(keep_out) > 0:
+        print('Halting due to intrusion into keep-out zone')
+        #return
+    else:
         config.tracking_ready = True # signal that the tracker is now producing tracking coordinates
+
+
+
+#check for overspeeds (likely near keyhole events)
+#coord(N+1) - coord(N) /time(N+1)-time(N) > system deg/sec capability
+#probably try anyway as could be interesting and don't want to discard stuff that flies straight overhead in any case
+
+# #Realtime        
+#     time_old = datetime.now()
+#     time_print = datetime.now()
+    
+#     while not config.end_program:
+#         config.tracking_ready = True # signal that the tracker is now producing tracking coordinates
         
-        timing.append(datetime.now())
-        aa = get_az_el(Time.now())
+#         timing.append(datetime.now())
+#         aa = get_az_el(Time.now())
 
-        if aa.alt > 0:
-            time1 = datetime.now()
+#         if aa.alt > 0:
+#             time1 = datetime.now()
 
-            countdown = set_time - datetime.now()
-            if datetime.now() > time_print + timedelta(seconds=10):
-                print(str(countdown.seconds) + '.' + str(countdown.microseconds) + 's until out of view')
-                print('current tracker generated angle az: ' + str(aa.az.deg) + ' el: ' + str(aa.alt.deg))
+#             countdown = set_time - datetime.now()
+#             if datetime.now() > time_print + timedelta(seconds=10):
+#                 print(str(countdown.seconds) + '.' + str(countdown.microseconds) + 's until out of view')
+#                 print('current tracker generated angle az: ' + str(aa.az.deg) + ' el: ' + str(aa.alt.deg))
 
-                time_print = datetime.now()
+#                 time_print = datetime.now()
 
             
-#            print('ITRS: ' + str(Time.now()) + ' ' + str(aa.alt) + ' ' + str(aa.az))
-            #print('ITRS: ' + str(Time.now()) + ' ' + str(aa.alt.deg) + ' ' + str(aa.az.deg))
+# #            print('ITRS: ' + str(Time.now()) + ' ' + str(aa.alt) + ' ' + str(aa.az))
+#             #print('ITRS: ' + str(Time.now()) + ' ' + str(aa.alt.deg) + ' ' + str(aa.az.deg))
             
-            time1 = datetime.now()
-            send_commands(my_locs, aa.az.deg, aa.alt.deg, queues['telescope_q'])
-            #don't use astropy Time print((datetime.now() - time1).quantity_str + ' send commands')
-#            print(str((datetime.now() - time1).seconds) + '.' + str((datetime.now() - time1).microseconds) + 's send commands')
-            #print('deg az: ' + str(aa.az.deg) + ' deg el ' + str(aa.alt.deg))
+#             time1 = datetime.now()
+#             send_commands(my_locs, aa.az.deg, aa.alt.deg, queues['telescope_q'])
+#             #don't use astropy Time print((datetime.now() - time1).quantity_str + ' send commands')
+# #            print(str((datetime.now() - time1).seconds) + '.' + str((datetime.now() - time1).microseconds) + 's send commands')
+#             #print('deg az: ' + str(aa.az.deg) + ' deg el ' + str(aa.alt.deg))
 
-            if datetime.now() > time_old + timedelta(seconds=camera_period): #check if time to take a photo
-                queues['camera_q'].put('az ' + str(aa.az.deg) + ' ' + 'el ' + str(aa.alt.deg),block=False)#take photo
-                time_old = datetime.now()
-            #don't use astropy Time print((datetime.now() - time1).quantity_str + ' time to send')
-#            print(str((datetime.now() - time1).seconds) + '.' + str((datetime.now() - time1).microseconds) + 's time to send')
+#             if datetime.now() > time_old + timedelta(seconds=camera_period): #check if time to take a photo
+#                 queues['camera_q'].put('az ' + str(aa.az.deg) + ' ' + 'el ' + str(aa.alt.deg),block=False)#take photo
+#                 time_old = datetime.now()
+#             #don't use astropy Time print((datetime.now() - time1).quantity_str + ' time to send')
+# #            print(str((datetime.now() - time1).seconds) + '.' + str((datetime.now() - time1).microseconds) + 's time to send')
 
-        else:
-            countdown = datetime.now() - rise_time
-            #don't use astropy Time print(countdown.quantity_str + ' until in view')
-            print(str(countdown.seconds) + '.' + str(countdown.microseconds) + 's until in view')
+#         else:
+#             countdown = datetime.now() - rise_time
+#             #don't use astropy Time print(countdown.quantity_str + ' until in view')
+#             print(str(countdown.seconds) + '.' + str(countdown.microseconds) + 's until in view')
 
-            pass
-    #print(timing)
-    config.x = timing
+#             pass
+#     #print(timing)
+#     config.x = timing
+# #End realtime
+
+    
     print('Terminated satellite tracking thread')
+
+#use the above functions to build list of az/el commands
+#then use the send_command to do the linking through lists and just update a target az/el variable in config that gets read by telescope control?
+#send_commands does the real-time sun pointing safety checks but needs to do it fast enough
+
+#needs fixing: doesn't check for sun during initial slews, maybe break those up into n degree steps?
+
 
 
 #Keep out zones (after getting desired commanded position)
@@ -288,6 +436,7 @@ def send_commands(my_locs, az, el, telescope_q):
         
     #get sun location
     telescope_time = datetime.now(timezone.utc) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
+    
     sun = get_body("sun", Time(telescope_time), location = my_loc)
     sunaltaz = sun.transform_to(AltAz(obstime=telescope_time, location=my_loc))
     sun_az = sunaltaz.az.deg + compass_dir + mag_declination.d

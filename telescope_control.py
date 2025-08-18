@@ -220,7 +220,10 @@ def telescope_control(queues):
             config.az_current = az_current
             config.el_current = el_current
 
-        
+            #check for sun intrusion (mostly during slews, since the start location won't be part of the trajectory that gets checked on creation)
+            #get sun location at time from  config.coordinates.append({'az':aa.az.deg, 'el':aa.alt.deg, 'sun_az':sun_az, 'sun_el':sun_el, 'time':t})
+            #if close to sun:
+            #    run = False
         
         output_str = ''
         #read status
@@ -241,7 +244,10 @@ def telescope_control(queues):
         config.az_angle = 360*az_encoder_value/az_counts_per_rev #update global angle value
         config.el_angle = 360*el_encoder_value/el_counts_per_rev #update global angle value
         
-        
+        if len(config.coordinates) > 0:
+            print('Reading ' + str(len(config.coordinates)) + ' coordinates')
+
+
         #pull queue
         try:
             # ####get command using queues
@@ -256,23 +262,38 @@ def telescope_control(queues):
             
             
             ####get command using config.coordinates
-            coord = config.coordinates.pop(0)
-            while coord['time'] < datetime.now(timezone.utc): #go through the list until we reach the present if not there already
+            time_print_spacing = 1
+        
+            if len(config.coordinates) > 0:
+                print('Pulling coordinate')
                 coord = config.coordinates.pop(0)
-
-            while datetime.now(timezone.utc) < coord['time']:
-                pass #wait for time to occur
+                print(coord['time'])
+                print(datetime.now())
+                last_print = datetime.now(timezone.utc)
                 
-            az_dest_counts = coord['az'] * az_counts_per_rev / 360 #this will always be 0-360 degrees from the trajectory planner
-            el_dest_counts = coord['el'] * el_counts_per_rev / 360 #this will always be 0-180 degrees from the trajectory planner
-            cmd = coord['cmd']
+                while coord['time'] < datetime.now(timezone.utc): #go through the list until we reach the present if not there already
+                    coord = config.coordinates.pop(0)
+    
+                while datetime.now(timezone.utc) < coord['time']:
+                    if datetime.now(timezone.utc) > last_print:
+                        last_print = datetime.now(timezone.utc) + timedelta(seconds=time_print_spacing)
+                        print('Waiting for new coordinate in ' + str(coord['time'] - datetime.now(timezone.utc) )+' H:M:S')
+                    continue #wait for coordinate time to occur
+                az_dest_counts = coord['az'] * az_counts_per_rev / 360 #this will always be 0-360 degrees from the trajectory planner
+                el_dest_counts = coord['el'] * el_counts_per_rev / 360 #this will always be 0-180 degrees from the trajectory planner
+                print('Issuing new coordinates to az_dest_counts '+str(az_dest_counts) + ' and el_dest_counts ' + str(el_dest_counts))
+
+                cmd = 'move_az_el'
+            else:
+                cmd = 'noop'
 
             
             ####finish command using config.coordinates
         except Exception as e:
-            print('Exception in telescope queue pulling')
+            print('Exception in pulling new coordinates in telescope_control!')
             print(e)
             cmd = 'hold'
+            #return
         
         ###### End status updates
             
@@ -285,6 +306,9 @@ def telescope_control(queues):
                 #record where sensor pulsed
                 #move to pulse location
                 #set encoder to 0
+    
+        elif cmd == 'noop': #no op
+            pass
     
         elif cmd == 'move_az_el':
             #move to new az/el
@@ -422,6 +446,7 @@ def telescope_control(queues):
         if run:
             try:
                 #send the new command destinations
+                
                 if robo_connected:
                     #The Buffer argument can be set to a 1 or 0. If a value of 0 is used the command will be buffered
                     #and executed in the order sent. If a value of 1 is used the current running command is stopped,
@@ -477,7 +502,7 @@ def telescope_control(queues):
     
         #return status
             #include queue length to make sure not backing up
-        status_q.put({'stats':stats, 'output':output_str})
+        #status_q.put({'stats':stats, 'output':output_str})
         #print('Finished telescope loop, continuing')
 
     print('Terminated satellite tracking thread')

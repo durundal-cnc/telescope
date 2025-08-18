@@ -117,11 +117,14 @@ geo_mag = GeoMag(coefficients_file="wmm/WMM_2025.COF")
 telescope_time = datetime.now(timezone.utc) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
 mag_declination = geo_mag.calculate(glat=lat, glon=long, alt=altitude/1000, time=telescope_time.year+int(telescope_time.strftime('%j'))/1000) #altitude in km for geo_mag
 #print('Magnetic declination: ' + str(mag_declination.d))
-target_name = 'moon' #'M33' 'sun' 'moon 'SDO'
+target_name = 'ISS' #'M33' 'sun' 'moon 'SDO' 'ISS'
 mode = 'satellite_tracking' #point and shoot, satellite tracking, astronomy
 camera_period = 10 #how many seconds between shots
 
 my_locs = {'EarthLocation':EarthLocation(lat=lat * u.deg, lon = long * u.deg, height = altitude * u.m), 'compass_dir':compass_dir, 'mag_declination':mag_declination}
+config.my_locs = my_locs
+config.mag_declination = mag_declination
+config.compass_dir = compass_dir
 
 #end user inputs (this should live in GUI someday)
 
@@ -175,7 +178,7 @@ time = Time.now()
 x = 1
 while not config.end_program:
     x=x+1
-    print(x)
+    #print(x)
     size = queues['status_q'].qsize() #check that an image is in the queue
     if size >= 1:
         #get status_q and display message

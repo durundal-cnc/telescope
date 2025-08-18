@@ -18,6 +18,9 @@ camera_process_ready = False
 image_process_ready = False
 telescope_process_ready = False
 coordinates = []
+my_locs = {}
+mag_declination = 0
+compass_dir = 0
 
 az_current = 0
 el_current = 0
