@@ -27,11 +27,11 @@ def telescope_control(queues):
 
     az_encoder_cpr = 48
     az_gearbox = 74.8317777777 #75:1 on pololu website
-    az_belt = 80/18
+    az_belt = 80/10 #number of teeth on large pulley/number of teeth on small pulley
     
     el_encoder_cpr = 48
     el_gearbox = 74.8317777777 #75:1 on pololu website
-    el_belt = 80/18
+    el_belt = 80/10
     
     az_counts_per_rev = az_encoder_cpr * az_gearbox * az_belt
     az_arcsec_per_count = 60*60 * 360/az_counts_per_rev #for reference
@@ -50,7 +50,7 @@ def telescope_control(queues):
 
     stats = {'test':'test'}
     
-    robo_connected = False
+    robo_connected = True
     run = True #send the command to the controller
     
     if not robo_connected:
@@ -64,18 +64,21 @@ def telescope_control(queues):
         restore_defaults = True
         reconnect = True
         while reconnect:
+            print('Opening roboclaw USB com port')
             #Windows comport name
             rc = Roboclaw("COM4",38400)
             #Linux comport name
             #rc = Roboclaw("/dev/ttyACM0",115200)
             roboclaw_success = rc.Open()
-            if not roboclaw_success:
-                print('Error opening roboclaw')
-                #return
+
             address = 0x80 #decimal 128
         
             version = rc.ReadVersion(address)
             print(version)
+            if not roboclaw_success or not version[0]:
+                print('Error opening roboclaw')
+               # return
+                
             #initialize
             if restore_defaults:
                 rc.RestoreDefaults(address) #need to re-establish serial connection once using this
@@ -85,13 +88,16 @@ def telescope_control(queues):
 
 
         # # set M1 & M2 enc (to 4294967295 max range, but is signed))
+        print('Setting encoder to 0')
         rc.SetEncM1(address,0)
         rc.SetEncM2(address,0)
         
+        print('Setting encoder directions')
         rc.SetM1EncoderMode(address, int('00100000', 2)) #reverse motor relative direction direction int('00100000', 2))
         rc.SetM2EncoderMode(address, int('00000000', 2)) #may need to adjust depending on how final wiring goes (so positive encoder and positive angle match)
         
         # # set M1&M2 max amps #stall current 5600mA, 10mA units for current limit
+        print('Setting max current')
         rc.SetM1MaxCurrent(address,5000) # Current value is in 10ma units. To calculate multiply current limit by 10.
         rc.SetM2MaxCurrent(address,5000)
         
@@ -110,9 +116,12 @@ def telescope_control(queues):
         #Limit(Rev) = 0x22
         #Limit(Fwd) = 0x12
         #Limit(Both) = 0x32
+        print('read pin functions')
         rc.ReadPinFunctions(address)
+        print('set pin functions')
         rc.SetPinFunctions(address, 0x01, 0x72, 0x72) #S3 is e-stop, home only for az, home and limits for el
 
+        print('Set velocity PID to 0')
         rc.SetM1VelocityPID(address, 0x00000000, 0x00000000, 0x00000000, 6800) #QPPS set by measuring motor velocity open loop, PID here defaults
         rc.SetM2VelocityPID(address, 0x00000000, 0x00000000, 0x00000000, 6800) #QPPS set by measuring motor velocity open loop, PID here defaults
         #have to set the velocity PID terms to zero or it enables a cascaded PIV-D loop. Roboclaw defaults to having some terms in the velocity loop
@@ -120,6 +129,7 @@ def telescope_control(queues):
 
 
         # # get M1POS PID [D(4 bytes), P(4 bytes), I(4 bytes), MaxI(4 bytes),Deadzone(4 bytes), MinPos(4 bytes), MaxPos(4 bytes)]
+        print('Read position PID')
         rc.ReadM1PositionPID(address)
         # # set M1POS PID
         P = 50 #use values from old project to start
@@ -129,9 +139,11 @@ def telescope_control(queues):
         max_I = 50
         min_pos = -2000000
         max_pos = 2000000
+        print('Set position PID')
         rc.SetM1PositionPID(address, P, I, D, max_I, deadzone, min_pos, max_pos)
         
         # # get M2POS PID
+        print('Read position PID')
         rc.ReadM2PositionPID(address)
         # # set M2POS PID
         P = 50#10000*1024 #use values from old project to start
@@ -141,9 +153,11 @@ def telescope_control(queues):
         max_I = 50#6500
         min_pos = -2000000
         max_pos = 2000000
+        print('Set position PID')
         rc.SetM2PositionPID(address, P, I, D, max_I, deadzone, min_pos, max_pos)
         
         # stats = 'this is the roboclaw stats pull'
+        print('Read errors in roboclaw registers')
         status = rc.ReadError(address)[0]
         status_list = [{'Normal' : status & 0x000000},
         {'E_Stop' : status & 0x000001}, #this always seems to be set?
@@ -194,8 +208,8 @@ def telescope_control(queues):
 ##############testing
 
         #queue commands
-        telescope_q = queues['telescope_q']
-        status_q = queues['status_q']
+#        telescope_q = queues['telescope_q']
+#       status_q = queues['status_q']
 
     while not config.end_program:
         config.telescope_process_ready = True
@@ -206,10 +220,12 @@ def telescope_control(queues):
             az_encoder_value = rc.ReadEncM1(address) #Receive: [Enc1(4 bytes), Status, CRC(2 bytes)]
             Bit1_az = is_set(az_encoder_value[1], 1)
             az_encoder_value = az_encoder_value[1]
-            
+            print('az encoder is ' + str(az_encoder_value))
+
             el_encoder_value = rc.ReadEncM2(address)
             Bit1_el = is_set(el_encoder_value[1], 1)
             el_encoder_value = el_encoder_value[1]
+            print('el encoder is ' + str(el_encoder_value))
 
             az_speed_PV = rc.ReadSpeedM1(address)[1] #status bit here also can tell speed (duplicate of ReadEncM1/2)
             el_speed_PV = rc.ReadSpeedM2(address)[1]

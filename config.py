@@ -22,5 +22,8 @@ my_locs = {}
 mag_declination = 0
 compass_dir = 0
 
+lat = 0
+long = 0
+
 az_current = 0
 el_current = 0

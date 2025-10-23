@@ -136,6 +136,7 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
     #load local copy of NORAD satellite list and find NORAD catid by name
     norad = pd.read_csv(r'C:\Users\AndrewMiller\OneDrive - Global Health Labs, Inc\Desktop\satcat.csv')
     #if target_name is only digits assume this is the NORAD catalog ID
+    target_name = target_name.upper() #NORAD catalog is allcaps
     print('Desired target name is ' + target_name)
     if target_name.isdigit():
         norad_cat_id = int(target_name)
@@ -155,8 +156,7 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
             val = input('Please enter desired index: ')
             print('You have selected ')
             print(nondecay_matcheds.iloc[int(val)].to_string())
-            norad_cat_id = int(nondecay_matcheds['NORAD_CAT_ID'].iloc[int(val)])
-
+            norad_cat_id = int(nondecay_matcheds['NORAD_CAT_ID'].iloc[int(val)]) #int(ser.iloc[0])
         else:
             print(nondecay_matcheds['NORAD_CAT_ID'])
             norad_cat_id = int(nondecay_matcheds['NORAD_CAT_ID'])
@@ -177,9 +177,9 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
         teme_v = CartesianDifferential(teme_v*u.km/u.s)
         teme = TEME(teme_p.with_differentials(teme_v), obstime=t)
                 
-        itrs_geo = teme.transform_to(ITRS(obstime=t))
-        location = itrs_geo.earth_location
-        location.geodetic
+        # itrs_geo = teme.transform_to(ITRS(obstime=t))
+        # location = itrs_geo.earth_location
+        # location.geodetic
         
         
         # from astropy.coordinates import ITRS
@@ -196,8 +196,19 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
         aa = itrs_topo.transform_to(AltAz(obstime=t, location=obs_location))
         return aa
 
-
-
+    def get_lat_long(t): #report satellite location as lat/long
+        t.format = 'jd' #SGP4 input is julian days and fractional days
+        error_code, teme_p, teme_v = satellite.sgp4(t.jd1, t.jd2)  # in km and km/s
+        if error_code != 0:
+            raise RuntimeError(SGP4_ERRORS[error_code])
+            
+        teme_p = CartesianRepresentation(teme_p*u.km)
+        teme_v = CartesianDifferential(teme_v*u.km/u.s)
+        teme = TEME(teme_p.with_differentials(teme_v), obstime=t)
+                
+        itrs_geo = teme.transform_to(ITRS(obstime=t))
+        location = itrs_geo.earth_location
+        return location.geodetic
 
 
     # from spacetrack import SpaceTrackClient #this pulls the TLE from a satellite database
@@ -207,8 +218,8 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
         print('Spacetrack TLE: ')
         #print(st.gp(norad_cat_id=[25544, 41335], format='tle')) #can get more than one TLE but not doing that here
         x = st.gp(norad_cat_id=[norad_cat_id], format='tle')
-        s = x.splitlines()[0] #first line of two line ephemeris (TLE)
-        t = x.splitlines()[1] #second line of two line ephemeris (TLE)
+        tle1 = x.splitlines()[0] #first line of two line ephemeris (TLE)
+        tle2 = x.splitlines()[1] #second line of two line ephemeris (TLE)
         print(x)
     except Exception as e:
         print(e)
@@ -218,8 +229,10 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
 #       Tracking map for TLE lookup: https://in-the-sky.org/satmap_radar.php?town=5809844
 # set time into the future, look for in view target, pull its info (implement lookup for single number input to grab TLE?), arm telescope which should sit until sat emerges above horizon
 
+
+
     
-    satellite = Satrec.twoline2rv(s, t) #this converts the TLE into a track that can get fed into astropy to produce the position at a time and then get angles for that
+    satellite = Satrec.twoline2rv(tle1, tle2) #this converts the TLE into a track that can get fed into astropy to produce the position at a time and then get angles for that
     print('Satellite track computed, comparing in view times')
     #see if astroplan works better for this than DIY
     #get first point above horizon
@@ -227,6 +240,91 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
     #report time to that point
     #move scope to that point
     #wait for in view and then start tracking (include countdown)
+    
+    def get_inview_times_TLL():
+        #direct calculation approach: https://digitalcommons.usu.edu/cgi/viewcontent.cgi?referer=&httpsredir=1&article=2075&context=smallsat
+        #using 2.1 to find approximate close locations, then use SGP4 directly to get details
+        lat = config.lat
+        long = config.long
+        n = float(tle2.split()[7]) #orbital mean motion
+        orbital_period = 1/(n/(60*60*24) )#orbits per day to 1/orbits per second = seconds per orbit
+        sat_latlong = get_lat_long(Time.now())
+        sat_lat = sat_latlong.lat.deg #arbitrary starting point in the past
+        #find time where satellite crosses ground station latitude
+        t = Time.now() - TimeDelta(24*3600, format='sec') #start 1 day ago so we can always be moving forward in time in the calculations
+        for secs in [1000, 100, 10, 1, 0.1]: #find the time of latitude crossing
+            sat_lat = get_lat_long(t).lat.deg
+            while (sat_lat <= lat): #get rise time
+                t = t + TimeDelta(secs, format='sec')
+                sat_lat = get_lat_long(t).lat.deg #the found crossing point
+                print('TLL at ' + str(sat_lat))
+            t = t - TimeDelta(secs, format='sec') #go back in time to the last position it was still up
+        t.format='isot'
+        print('previous latitude crossing time:')
+        print(t)
+        #find time of next TLL crossings and get latitude there (orbital period)
+        for x in range(10):
+            t = t + TimeDelta(x*orbital_period, format='sec')
+            sat_lat = get_lat_long(t).lat.deg #the found crossing point
+            sat_long = get_lat_long(t).lon.deg
+            t.format='isot'
+            print('TLL at ' + str("%.2f" % sat_lat) + ' Long error ' + str("%.2f" % (long-sat_long)) + ' ' + t.value)
+
+        #check that the math is right by brute force
+        t = Time.now() - TimeDelta(24*3600, format='sec') #start 1 day ago so we can always be moving forward in time in the calculations
+        biglist = []
+        for x in range(2592): #3 days of 100 seconds
+            t.format='isot'
+            t2 = t + TimeDelta(100*x, format='sec')
+            aa = get_az_el(t2)
+            t2.format='isot'
+            biglist.append([aa.alt.deg, t2])
+            print(str(x) + ' ' + t2.value)
+        
+        for element in biglist:
+            if element[0] > 0:
+                print(element)
+                break
+            print(element.el)
+
+        #now make list of crossing times from yesterday's crossing until the next one that is above the horizon
+        earth_rotation_rate = (360.9856)/(24*3600) #deg/day into deg/sec
+        #longitudinal change at same latitude
+        delta_long = earth_rotation_rate * orbital_period #degrees/sec * sec, change in longitude per orbit
+        
+        
+        #t = t + TimeDelta(, format='sec')
+        
+        deltaV = get_lat_long(t).lon.deg - config.long
+        
+        
+        
+        N = (deltaV*n)/(360*earth_rotation_rate) #use degrees instead of radians in the 2.1 equations. Result is seconds to next TLL (target latitude location)
+        for x in [1,2,3,4,5,6]:
+            N = x*(deltaV*n)/(360*earth_rotation_rate)
+            
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     
     #get the in view times
     t = Time.now()
@@ -239,6 +337,11 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
         
         t = Time.now()
         for secs in [1000, 100, 10, 1, 0.1]: #find the object's rise time
+        #this is crude and can skip over small windows
+        #direct calculation approach: https://digitalcommons.usu.edu/cgi/viewcontent.cgi?referer=&httpsredir=1&article=2075&context=smallsat
+        #get times of closest approach from that
+        #put them into Satrec and see if above horizon
+        #if no, repeeat
 #            print('steps of ' + str(secs) +' seconds')
             aa = get_az_el(t)
             while (aa.alt <= 0): #get rise time

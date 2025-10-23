@@ -30,6 +30,15 @@ from camera_control import camera_control #takes photos
 from image_save import image_save #saves photos
 import tracking_modes #library of different pointing modes
 
+import sys
+sys.path.append(r'C:\Users\AndrewMiller\OneDrive - Global Health Labs, Inc\Desktop\roboclaw_python')
+from roboclaw_3 import Roboclaw
+import math
+import config # https://docs.python.org/3/faq/programming.html#how-do-i-share-global-variables-across-modules
+from datetime import datetime, date, timezone, timedelta
+
+
+
 #tool to align telescope images for stitching: https://astroalign.quatrope.org/en/latest/
 
 def import_iphone_data(): #get location and orientation data from phone airdrop of CSV sensor logs
@@ -110,14 +119,15 @@ lat = iphone['latitude']
 long = iphone['longitude']
 altitude = iphone['altitude']
 compass_dir = iphone['compass']
-
+config.lat = lat
+config.long = long
 
 #compute magnetic declination 
 geo_mag = GeoMag(coefficients_file="wmm/WMM_2025.COF")
 telescope_time = datetime.now(timezone.utc) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
 mag_declination = geo_mag.calculate(glat=lat, glon=long, alt=altitude/1000, time=telescope_time.year+int(telescope_time.strftime('%j'))/1000) #altitude in km for geo_mag
 #print('Magnetic declination: ' + str(mag_declination.d))
-target_name = 'ISS' #'M33' 'sun' 'moon 'SDO' 'ISS'
+target_name = 'Starlink-4727' #'M33' 'sun' 'moon 'SDO' 'ISS'
 mode = 'satellite_tracking' #point and shoot, satellite tracking, astronomy
 camera_period = 10 #how many seconds between shots
 
@@ -174,7 +184,7 @@ print('consumer_telescope started')
 print('All threads started')
 statuses = []
 time = Time.now()
-
+#%%
 x = 1
 while not config.end_program:
     x=x+1
@@ -213,7 +223,10 @@ print('consumer_telescope join() complete')
 
 
 print('All threads finished')
-y = [j - i for i,j in zip(config.x[:-1], config.x[1:])]
+
+
+
+#y = [j - i for i,j in zip(config.x[:-1], config.x[1:])]
 
 # def point_and_shoot():
 #     pass
