@@ -122,6 +122,7 @@ def astronomy(my_locs, queues, target_name = 'moon', camera_period = 10):
     print('Terminated astronomy thread')
 
 def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
+
     
     #if this is too slow, make a table to timetagged angles to run through instead of trying to calculate in realtime?
     
@@ -134,7 +135,7 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
     # from astropy.time import Time, TimeDelta, TimeDeltaSec
 
     #load local copy of NORAD satellite list and find NORAD catid by name
-    norad = pd.read_csv(r'C:\Users\AndrewMiller\OneDrive - Global Health Labs, Inc\Desktop\satcat.csv')
+    norad = pd.read_csv(r'/Users/andrewmiller/telescope/satcat.csv')
     #if target_name is only digits assume this is the NORAD catalog ID
     target_name = target_name.upper() #NORAD catalog is allcaps
     print('Desired target name is ' + target_name)
@@ -439,7 +440,7 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
     keep_out = []
     keep_out_angle = 5
     print('Check for sun angle intrusions and write to file for reference')
-    with open(r'C:\Users\AndrewMiller\OneDrive - Global Health Labs, Inc\Desktop\track.txt', 'w') as f:
+    with open(r'/Users/andrewmiller/telescope/track.txt', 'w') as f:
 
         for line in config.coordinates:
             f.write("%s\n" % line)     #save to file for review

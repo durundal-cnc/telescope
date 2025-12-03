@@ -21,7 +21,7 @@ import pandas as pd
 import zipfile
 import shutil
 
-sys.path.append(r'C:\Users\AndrewMiller\OneDrive - Global Health Labs, Inc\Desktop')
+sys.path.append(r'/Users/andrewmiller/telescope/')
 
 #my functions
 import config # https://docs.python.org/3/faq/programming.html#how-do-i-share-global-variables-across-modules
@@ -31,7 +31,7 @@ from image_save import image_save #saves photos
 import tracking_modes #library of different pointing modes
 
 import sys
-sys.path.append(r'C:\Users\AndrewMiller\OneDrive - Global Health Labs, Inc\Desktop\roboclaw_python')
+sys.path.append(r'/Users/andrewmiller/telescope/roboclaw_python')
 from roboclaw_3 import Roboclaw
 import math
 import config # https://docs.python.org/3/faq/programming.html#how-do-i-share-global-variables-across-modules
@@ -49,7 +49,7 @@ def import_iphone_data(): #get location and orientation data from phone airdrop 
     
     
     #unpack zip
-    zip_file_loc = r'C:\Users\AndrewMiller\Downloads\14360_SE_Eastgate_Way-2025-07-18_17-03-55.zip'
+    zip_file_loc = r'/Users/andrewmiller/telescope/14360_SE_Eastgate_Way-2025-07-18_17-03-55.zip'
     with zipfile.ZipFile(zip_file_loc, 'r') as zip_ref:
         unzip_dir = os.path.join(os.path.dirname(zip_file_loc),'iPhone_metadata')
         if os.path.exists(unzip_dir):
@@ -58,7 +58,7 @@ def import_iphone_data(): #get location and orientation data from phone airdrop 
         zip_ref.extractall(unzip_dir)
     
     #import files
-    sensor_files = r'C:\Users\AndrewMiller\Downloads\14360_SE_Eastgate_Way-2025-07-18_17-03-55'
+    sensor_files = r'/Users/andrewmiller/telescope/iPhone_metadata'
     files = [ name for name in os.listdir(sensor_files) if name[-4:] == '.csv' ]
     return_dict = {}
     for file in files:
@@ -127,7 +127,7 @@ geo_mag = GeoMag(coefficients_file="wmm/WMM_2025.COF")
 telescope_time = datetime.now(timezone.utc) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
 mag_declination = geo_mag.calculate(glat=lat, glon=long, alt=altitude/1000, time=telescope_time.year+int(telescope_time.strftime('%j'))/1000) #altitude in km for geo_mag
 #print('Magnetic declination: ' + str(mag_declination.d))
-target_name = 'Starlink-4727' #'M33' 'sun' 'moon 'SDO' 'ISS'
+target_name = 'ISS' #'Starlink-4727' #'M33' 'sun' 'moon 'SDO' 'ISS'
 mode = 'satellite_tracking' #point and shoot, satellite tracking, astronomy
 camera_period = 10 #how many seconds between shots
 
@@ -171,6 +171,7 @@ queues = {'camera_q':camera_q, 'image_save_q':image_save_q, 'telescope_q':telesc
 # start the producer
 thread_tracker = Thread(target=funct_dict[mode], args=(my_locs, queues, target_name, camera_period)) #runs the mode in tracking_modes.py
 thread_tracker.start()
+
 while not config.tracking_ready:
     pass
 print('thread_tracker started')

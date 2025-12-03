@@ -10,7 +10,7 @@ import config # https://docs.python.org/3/faq/programming.html#how-do-i-share-gl
 
 def image_save(queues):
 
-    savepath = r'C:\Users\AndrewMiller\Telescope\images'
+    savepath = r'/Users/andrewmiller/telescope/images'
     print('Starting image_save thread')
     
     while not config.end_program:

@@ -5,7 +5,7 @@ Created on Wed Jun 11 11:17:53 2025
 @author: AndrewMiller
 """
 import sys
-sys.path.append(r'C:\Users\AndrewMiller\OneDrive - Global Health Labs, Inc\Desktop\roboclaw_python')
+sys.path.append(r'/Users/andrewmiller/telescope/roboclaw_python')
 from roboclaw_3 import Roboclaw
 import math
 import config # https://docs.python.org/3/faq/programming.html#how-do-i-share-global-variables-across-modules
@@ -25,13 +25,17 @@ def telescope_control(queues):
     #M1 = az
     #M2 = el
 
-    az_encoder_cpr = 48
-    az_gearbox = 74.8317777777 #75:1 on pololu website
-    az_belt = 80/10 #number of teeth on large pulley/number of teeth on small pulley
+    az_encoder_cpr = 4000
+    az_gearbox = 100 #75:1 on pololu website
+    az_belt = 60/20 #number of teeth on large pulley/number of teeth on small pulley
     
-    el_encoder_cpr = 48
-    el_gearbox = 74.8317777777 #75:1 on pololu website
-    el_belt = 80/10
+    # el_encoder_cpr = 48
+    # el_gearbox = 74.8317777777 #75:1 on pololu website
+    # el_belt = 80/10
+    
+    el_encoder_cpr = 4000 #1000 pulse/rev with quadrature
+    el_gearbox = 100 #harmonic drive
+    el_belt = 60/20
     
     az_counts_per_rev = az_encoder_cpr * az_gearbox * az_belt
     az_arcsec_per_count = 60*60 * 360/az_counts_per_rev #for reference
@@ -39,14 +43,14 @@ def telescope_control(queues):
     el_arcsec_per_count = 60*60 * 360/el_counts_per_rev #for reference
     
     deadband_counts = 10
-    az_backlash = 66 #needs measurement
-    el_backlash = 66 #needs measurement
-    az_accel = 100 #counts/sec^2, from old project to start with
-    az_speed_SV = 1000#counts/sec
-    az_deccel = 100#counts/sec^2
-    el_accel = 100#counts/sec^2
-    el_speed_SV = 1000#counts/sec
-    el_deccel = 100#counts/sec^2
+    az_backlash = 0 #needs measurement
+    el_backlash = 0 #needs measurement
+    az_accel = 100000 #counts/sec^2
+    az_speed_SV = 40000#counts/sec #max is 240k
+    az_deccel = 100000#counts/sec^2
+    el_accel = 100000#counts/sec^2
+    el_speed_SV = 40000#counts/sec
+    el_deccel = 100000#counts/sec^2
 
     stats = {'test':'test'}
     
@@ -66,9 +70,9 @@ def telescope_control(queues):
         while reconnect:
             print('Opening roboclaw USB com port')
             #Windows comport name
-            rc = Roboclaw("COM4",38400)
+            #rc = Roboclaw("COM4",38400)
             #Linux comport name
-            #rc = Roboclaw("/dev/ttyACM0",115200)
+            rc = Roboclaw("/dev/tty.usbmodem1101",38400)
             roboclaw_success = rc.Open()
 
             address = 0x80 #decimal 128
@@ -122,36 +126,38 @@ def telescope_control(queues):
         rc.SetPinFunctions(address, 0x01, 0x72, 0x72) #S3 is e-stop, home only for az, home and limits for el
 
         print('Set velocity PID to 0')
-        rc.SetM1VelocityPID(address, 0x00000000, 0x00000000, 0x00000000, 6800) #QPPS set by measuring motor velocity open loop, PID here defaults
-        rc.SetM2VelocityPID(address, 0x00000000, 0x00000000, 0x00000000, 6800) #QPPS set by measuring motor velocity open loop, PID here defaults
+        rc.SetM1VelocityPID(address, 0x00000000, 0x00000000, 0x00000000, 256875) #QPPS set by measuring motor velocity open loop, PID here defaults
+        rc.SetM2VelocityPID(address, 0x00000000, 0x00000000, 0x00000000, 256875) #QPPS set by measuring motor velocity open loop, PID here defaults
         #have to set the velocity PID terms to zero or it enables a cascaded PIV-D loop. Roboclaw defaults to having some terms in the velocity loop
+#open loop speed seems to max out at 30000 but has significant variability there - down to 20k, averaging maybe 25k
+#QPPS from PIV autotune = 102187
 
-
+#these probably need to be re-evaluated after the drives have been run in a bit
 
         # # get M1POS PID [D(4 bytes), P(4 bytes), I(4 bytes), MaxI(4 bytes),Deadzone(4 bytes), MinPos(4 bytes), MaxPos(4 bytes)]
         print('Read position PID')
         rc.ReadM1PositionPID(address)
         # # set M1POS PID
-        P = 50 #use values from old project to start
+        P = 39 #starting values from autotune in motion studio, for harmonic drives by their lonesome
         I = 2
-        D = 100
+        D = 540
         deadzone = 4
-        max_I = 50
-        min_pos = -2000000
+        max_I = 2617
+        min_pos = 0
         max_pos = 2000000
         print('Set position PID')
         rc.SetM1PositionPID(address, P, I, D, max_I, deadzone, min_pos, max_pos)
         
         # # get M2POS PID
         print('Read position PID')
-        rc.ReadM2PositionPID(address)
+        print(rc.ReadM2PositionPID(address))
         # # set M2POS PID
-        P = 50#10000*1024 #use values from old project to start
-        I = 2#120*1024
-        D = 100#10000*1024
-        deadzone = 4
-        max_I = 50#6500
-        min_pos = -2000000
+        P = 39 #starting values from autotune in motion studio, for harmonic drives by their lonesome
+        I = 2
+        D = 540
+        deadzone = 0
+        max_I = 2617
+        min_pos = 0 #negative values here seem to cause undefined behavior (though not in motion studio)
         max_pos = 2000000
         print('Set position PID')
         rc.SetM2PositionPID(address, P, I, D, max_I, deadzone, min_pos, max_pos)
@@ -188,14 +194,24 @@ def telescope_control(queues):
 
 #############testing
 
-        # rc.ReadEncoderModes(address)
-        # rc.DutyM1(address, 0)
-        # rc.DutyM2(address, 0)
-        # rc.DutyM1(address, 10000)
-        # rc.DutyM2(address, 10000)
-        # rc.SpeedAccelDeccelPositionM1(address, 100, 1000, 100, -20000, 1) #(address, accel, speed, deccel, position, buffer) #need to play with accel/decel in final system for smooth motion
-        # rc.SpeedAccelDeccelPositionM2(address, 100, 1000, 100, 40000, 1) #(address, accel, speed, deccel, position, buffer)
-
+        # # rc.ReadEncoderModes(address)
+        # # rc.DutyM1(address, 0)
+        # # rc.DutyM2(address, 0)
+        # # rc.DutyM1(address, 10000)
+        # # rc.DutyM2(address, 10000)
+        # # rc.SpeedAccelDeccelPositionM1(address, 100, 1000, 100, -20000, 1) #(address, accel, speed, deccel, position, buffer) #need to play with accel/decel in final system for smooth motion
+        #  #rc.SpeedAccelDeccelPositionM2(address, 100, 1000, 100, 40000, 1) #(address, accel, speed, deccel, position, buffer)
+        # el_dest_counts = 0
+        # el_speed_SV = 100
+        # buffer = 1
+        # rc.SpeedAccelDeccelPositionM2(address, el_accel, el_speed_SV, el_deccel, el_dest_counts, buffer)
+        # rc.GetDeadBand(address)
+        # rc.GetConfig(address)
+        # rc.ReadBuffers(address)
+        # rc.ReadM2PositionPID(address)
+        # rc.ReadM2VelocityPID(address)
+        # rc.ReadPWMMode(address)
+        
         # while True:
         #     az_encoder_value = rc.ReadEncM1(address) #Receive: [Enc1(4 bytes), Status, CRC(2 bytes)]
         #     Bit1_az = is_set(az_encoder_value[1], 1)

@@ -66,7 +66,7 @@ start_mm = 0
 step_size_mm = .1
 blur = 1
 
-file_loc = r'C:\Users\AndrewMiller\Downloads\001'
+file_loc = r'/Users/andrewmiller/telescope/001'
 files = [ name for name in os.listdir(file_loc) if name[-4:] == '.jpg' ]
 
 # How many steps to take to achieve the desired step size, +1 to check end_mm
