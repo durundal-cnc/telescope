@@ -18,6 +18,8 @@ from sgp4.api import SGP4_ERRORS
 from astropy.time import Time, TimeDelta, TimeDeltaSec
 from astropy import units as u
 from astropy.coordinates import EarthLocation, AltAz, ITRS, TEME, CartesianDifferential, CartesianRepresentation,  SkyCoord, get_body, get_sun
+from astropy import coordinates as coord
+
 from spacetrack import SpaceTrackClient #this pulls the TLE from a satellite database
 
 import pandas as pd
@@ -53,7 +55,7 @@ def point_and_shoot(my_loc, queues, FOV = 1, az_steps = 10, el_steps = 5): #unit
 #include way to scan by start/end lat/long coordinates
 
 #astronomy mode:
-def astronomy(my_locs, queues, target_name = 'moon', camera_period = 10):
+def astronomy(my_locs, target_name = 'moon', timespacing = timedelta(seconds=1), timestart = datetime.now(timezone.utc), timeend = datetime.now(timezone.utc) + timedelta(seconds=60)):
     # import config # https://docs.python.org/3/faq/programming.html#how-do-i-share-global-variables-across-modules
 
     # import astropy.units as u
@@ -61,14 +63,15 @@ def astronomy(my_locs, queues, target_name = 'moon', camera_period = 10):
     # from datetime import datetime, date, timezone, timedelta
     # from astropy.coordinates import AltAz, EarthLocation, SkyCoord, get_body, get_sun
     # from pygeomag import GeoMag
-
+    
     print('Starting astronomy thread')
-
+    
+    target_time_az_el_list = []
     
     compass_dir = my_locs['compass_dir']   
     mag_declination = my_locs['mag_declination']
     my_loc = my_locs['EarthLocation']
-
+    
     x = 1
     time_old = datetime.now(timezone.utc)
     
@@ -82,46 +85,42 @@ def astronomy(my_locs, queues, target_name = 'moon', camera_period = 10):
         except Exception as e:
             print('could not find target or body')
             print(e)
-            config.end_program = True
+#            return ['invalid', 0, 0]
     #moon = get_body("moon", Time(telescope_time), location = my_loc)
     #sun = get_body("sun", Time(telescope_time), location = my_loc)
-
     
+    #     if     datetime.now(timezone.utc) > time_old + timedelta(0,5): #rate limiter, remove after testing
     
-    while not config.end_program:
-            config.tracking_ready = True # signal that the tracker is now producing tracking coordinates
-
-   #     if     datetime.now(timezone.utc) > time_old + timedelta(0,5): #rate limiter, remove after testing
-
-            #https://docs.astropy.org/en/latest/coordinates/example_gallery_plot_obs_planning.html
-            telescope_time = Time.now() #datetime.now(timezone.utc) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
-            #end input
-
-            #need to convert moon to SkyCoord before proceeding to get alt/az
-            
-            #altitude:  angle between the object and the observer's local horizon (0-90 deg)
-            #aziumuth: measured from true north and increasing eastward (N = 0, E = 90, S= 180, W = 270)
-    
-            targetaltaz = target.transform_to(AltAz(obstime=telescope_time, location=my_loc))
-            #print(target_name + f"'s Altitude = {targetaltaz.alt:.2}")
-            #print(target_name + f"'s Azimuth = {targetaltaz.az:.2}")
-            
-            #adjust azimuth for position of telescope base
-            az = targetaltaz.az.deg + compass_dir + mag_declination.d
-            el = targetaltaz.alt.deg
-            
-            print('az: ' + str(az) + ' ' + 'el: ' + str(el))
-            x = x + 1
-            send_commands(my_locs, az, el, queues['telescope_q'])
-            
-            if datetime.now(timezone.utc) > time_old + timedelta(seconds=camera_period): #check if time to take a photo
-                queues['camera_q'].put('az ' + str(az) + ' ' + 'el ' + str(el))#take photo
-                time_old = datetime.now(timezone.utc)
+    #https://docs.astropy.org/en/latest/coordinates/example_gallery_plot_obs_planning.html
+    telescope_time = timestart
+    target_time_az_el_list = []
+    while telescope_time < timeend:
         
-    #print('el: ' + str(el))
+        #end input
+        
+        #need to convert moon to SkyCoord before proceeding to get alt/az
+        
+        #altitude:  angle between the object and the observer's local horizon (0-90 deg)
+        #aziumuth: measured from true north and increasing eastward (N = 0, E = 90, S= 180, W = 270)
+        
+        targetaltaz = target.transform_to(AltAz(obstime=telescope_time, location=my_loc))
+        #print(target_name + f"'s Altitude = {targetaltaz.alt:.2}")
+        #print(target_name + f"'s Azimuth = {targetaltaz.az:.2}")
+        
+        #adjust azimuth for position of telescope base
+        az = (targetaltaz.az.deg + compass_dir + mag_declination.d ) % 360
+        el = targetaltaz.alt.deg
+        
+        print('az: ' + str(az) + ' ' + 'el: ' + str(el))
+        x = x + 1
+        target_time_az_el_list.append([target_name, telescope_time, az, el])
+        
+        telescope_time = telescope_time + timespacing#Time.now() #datetime.now(timezone.utc) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
+
+    return target_time_az_el_list
     print('Terminated astronomy thread')
 
-def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
+def satellite_tracking(my_locs, target_name = 'ISS', timespacing = timedelta(seconds=1), timestart = datetime.now(timezone.utc), timeend = None):
 
     
     #if this is too slow, make a table to timetagged angles to run through instead of trying to calculate in realtime?
@@ -242,6 +241,8 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
     #move scope to that point
     #wait for in view and then start tracking (include countdown)
     
+    
+    ########## IN WORK ##########
     def get_inview_times_TLL():
         #direct calculation approach: https://digitalcommons.usu.edu/cgi/viewcontent.cgi?referer=&httpsredir=1&article=2075&context=smallsat
         #using 2.1 to find approximate close locations, then use SGP4 directly to get details
@@ -305,26 +306,8 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
             N = x*(deltaV*n)/(360*earth_rotation_rate)
             
     
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+    ########## END IN WORK ##########
+
     
     
     #get the in view times
@@ -410,23 +393,40 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
     ####### add yes/no check if in view time not in next 5 minutes (wait or try new target)
     config.coordinates = []
     t = rise_time
-    timespacing = 1
     my_loc = config.my_locs['EarthLocation']
     compass_dir = config.my_locs['compass_dir']   
     mag_declination = config.my_locs['mag_declination']
 
     coordinates = []
-    while t < set_time:
+    target_time_az_el_list = []
+    print('start getting az el coordinates to return')
+    print('rise time         : ' + str(rise_time))
+    print('set time          : ' + str(set_time))
+    print('starting time     : ' + str(t))
+    print('uesr ending time  : ' + str(timeend))
+
+
+    while t < set_time: #compute the telescope time/az/el sets
         #get az-el and time
-        aa = get_az_el(Time(t))
-        
-        sun = get_body("sun", Time(t), location = my_loc)
-        sunaltaz = sun.transform_to(AltAz(obstime=t, location=my_loc))
-        sun_az = sunaltaz.az.deg + compass_dir + mag_declination.d
-        sun_el = sunaltaz.alt.deg
-        
-        coordinates.append({'az':aa.az.deg, 'el':aa.alt.deg, 'sun_az':sun_az, 'sun_el':sun_el, 'time':t})
-        t = t + timedelta(seconds=timespacing)
+        if timeend is not None:
+            if t < timeend:
+                pass #wait until time is in the specified zone
+            else:
+                t = t + timespacing
+                continue
+
+        else: #before the end time or no end time specified
+            print('pulling coordinate at time ' + str(t))
+            aa = get_az_el(Time(t)) #get the coordinates        
+            
+    #moved sun checks out of here        #sun = get_body("sun", Time(t), location = my_loc)
+            #sunaltaz = sun.transform_to(AltAz(obstime=t, location=my_loc))
+            #sun_az = sunaltaz.az.deg + compass_dir + mag_declination.d
+            #sun_el = sunaltaz.alt.deg
+            #coordinates.append({'az':aa.az.deg, 'el':aa.alt.deg, 'sun_az':sun_az, 'sun_el':sun_el, 'time':t})
+            target_time_az_el_list.append([target_name, t, aa.az.deg, aa.alt.deg])
+            print([target_name, t, aa.az.deg, aa.alt.deg])
+            t = t + timespacing
     config.coordinates = coordinates #store in shared variable
 
     print('Completed trajectory calculations')
@@ -434,8 +434,9 @@ def satellite_tracking(my_locs, queues, target_name = 'ISS', camera_period = 1):
     secs = (set_time - rise_time).seconds
     print('In view time: ' + str(secs) +' seconds (' + str(mins) + ' min ' + str(secs-(60*mins)) + ' sec)')
     
-
+    return target_time_az_el_list
     
+
     #check that the sun won't end up in the trajectory
     keep_out = []
     keep_out_angle = 5
