@@ -148,100 +148,103 @@ target_track = namedtuple('target_track', ['target_name', 'time', 'az', 'el']) #
 # pt1 = Point(1.0, 5.0)
 # pt2 = Point(2.5, 1.5)
 
+######## start the GUI
 
-#for each target compute the time and coordinates:
-    #first add the sun to be able to check for keep outs:
-target_list = [['sun','astronomy'], ['moon','astronomy'], ['polaris','astronomy'], ['M42', 'astronomy'], ['ISS', 'satellite_tracking'] ]
-#target_list = [['sun','astronomy'], ['moon','astronomy'], ['polaris','astronomy'], ['M42', 'astronomy'] ]
 
-tracks = []
 
-for targetpair in target_list:
-    print('searching for target ' + str(targetpair))
-    target = targetpair[0]
-    mode = targetpair[1]
-    match mode:
-        case 'satellite_tracking':
-            # Code to execute if subject matches pattern_1
-            x = satellite_tracking(my_locs, target_name = 'ISS', timespacing = timedelta(seconds=1), timestart = datetime.now(timezone.utc))
+######## GUI running
 
-#need to check that time end works properly when specified           #x = satellite_tracking(my_locs, target_name = 'ISS', timespacing = timedelta(seconds=1), timestart = datetime.now(timezone.utc), timeend = datetime.now(timezone.utc) + timedelta(seconds=60))
-            tracks = tracks +[target_track(*i) for i in x]#(*i) unpacks the list as an input to the namedtuple
 
-            print(mode)
-        case 'astronomy':
-            # Code to execute if subject matches pattern_2
-            #x = astronomy(my_locs, target_name = target, timespacing = timedelta(seconds=1), timestart = datetime.now(timezone.utc), timeend = datetime.now(timezone.utc) + timedelta(seconds=60))
-
-            x = astronomy(my_locs, target_name = target, timespacing = timedelta(seconds=1), timestart = datetime.now(timezone.utc))
-            tracks = tracks +[target_track(*i) for i in x]#(*i) unpacks the list as an input to the namedtuple
+######## Get the target coordinates
+def compute_target_coords(target_list = [['sun','astronomy'], ['moon','astronomy'], ['polaris','astronomy'], ['M42', 'astronomy'], ['ISS', 'satellite_tracking'] ]):
+    #for each target compute the time and coordinates:
+        #first add the sun to be able to check for keep outs:
+    #target_list = [['sun','astronomy'], ['moon','astronomy'], ['polaris','astronomy'], ['M42', 'astronomy'], ['ISS', 'satellite_tracking'] ]
+    #target_list = [['sun','astronomy'], ['moon','astronomy'], ['polaris','astronomy'], ['M42', 'astronomy'] ]
     
-            print(mode)
-        case 'point_and_shoot':
-            #
-            print(mode)
-        case _:
-            print(mode)
-            
-#filter the output (optional)
-specific_track = sorted(tracks, key=lambda x: x.target_name)
-x = [record for record in tracks if record.target_name is 'sun']
-
-
-#quick printout for checking
-for x in tracks:
-    print(  x.time.strftime("%Y-%m-%d %H:%M:%S")  + ' ' + str(x.az) + ' ' + str(x.el)  + ' ' + x.target_name)
-
-
-#check for sun angle inclusion
-#get time bounds of min-max of all times
-all_times = [record.time for record in tracks]
-
-observations_start = min(all_times)
-observations_end   = max(all_times)
-
-#compute sun location for all observations
-sun = astronomy(my_locs, target_name = 'Sun', timespacing = timedelta(seconds=1), timestart = observations_start, timeend = observations_end)
-sun =[target_track(*i) for i in sun]#(*i) unpacks the list as an input to the namedtuple
-
-keepout = 5 #keep out degrees from the sun
-sunintrusions = []
-for track,sunloc in zip(tracks, sun):
-    if abs(track.az-sunloc.az) < keepout and abs(track.el-sunloc.el) < keepout:
-        sunintrusions.append([track,sunloc])
-        print('intrusion into sun: ')    
-        print(track)
-            
-print('Found ' + str(len(sunintrusions)) + ' sun keep out intrusions')
-intrusions = set([x[0].target_name for x in sunintrusions])
-print('Targets with sun intrustions: ' + str(intrusions))
-
-#add stop point or drop any sun intrusion runs
-
-#order runs by time of observation
-observations = set([x.target_name for x in tracks])
-individual_tracks = []
-time_of_individual_tracks = []
-for observation in observations:
-    x = [record for record in tracks if record.target_name is observation]
-    individual_tracks.append(x)
-    time_of_individual_tracks.append(x[0].time)
-time_of_individual_tracks, individual_tracks = zip(*sorted(zip(time_of_individual_tracks, individual_tracks )))
-name_of_individual_tracks = [x[0].target_name for x in individual_tracks]
-individual_tracks = dict(zip(name_of_individual_tracks, individual_tracks))
-
-# funct_dict = {
-#     "point_and_shoot": tracking_modes.point_and_shoot,
-#     "astronomy": tracking_modes.astronomy,
-#     "satellite_tracking": tracking_modes.satellite_tracking
-# }
+    tracks = []
+    
+    for targetpair in target_list:
+        print('searching for target ' + str(targetpair))
+        target = targetpair[0]
+        mode = targetpair[1]
+        match mode:
+            case 'satellite_tracking':
+                # Code to execute if subject matches pattern_1
+                x = satellite_tracking(my_locs, target_name = 'ISS', timespacing = timedelta(seconds=1), timestart = datetime.now(timezone.utc))
+    
+    #need to check that time end works properly when specified           #x = satellite_tracking(my_locs, target_name = 'ISS', timespacing = timedelta(seconds=1), timestart = datetime.now(timezone.utc), timeend = datetime.now(timezone.utc) + timedelta(seconds=60))
+                tracks = tracks +[target_track(*i) for i in x]#(*i) unpacks the list as an input to the namedtuple
+    
+                print(mode)
+            case 'astronomy':
+                # Code to execute if subject matches pattern_2
+                #x = astronomy(my_locs, target_name = target, timespacing = timedelta(seconds=1), timestart = datetime.now(timezone.utc), timeend = datetime.now(timezone.utc) + timedelta(seconds=60))
+    
+                x = astronomy(my_locs, target_name = target, timespacing = timedelta(seconds=1), timestart = datetime.now(timezone.utc))
+                tracks = tracks +[target_track(*i) for i in x]#(*i) unpacks the list as an input to the namedtuple
+        
+                print(mode)
+            case 'point_and_shoot':
+                #
+                print(mode)
+            case _:
+                print(mode)
+                
+    #filter the output (optional examples)
+    #specific_track = sorted(tracks, key=lambda x: x.target_name)
+    #x = [record for record in tracks if record.target_name is 'sun']
+    
+    
+    #quick printout for checking
+    for x in tracks:
+        print(  x.time.strftime("%Y-%m-%d %H:%M:%S")  + ' ' + str(x.az) + ' ' + str(x.el)  + ' ' + x.target_name)
+    
+    
+    #check for sun angle inclusion
+    #get time bounds of min-max of all times
+    all_times = [record.time for record in tracks]
+    
+    observations_start = min(all_times)
+    observations_end   = max(all_times)
+    
+    #compute sun location for all observations
+    sun = astronomy(my_locs, target_name = 'Sun', timespacing = timedelta(seconds=1), timestart = observations_start, timeend = observations_end)
+    sun =[target_track(*i) for i in sun]#(*i) unpacks the list as an input to the namedtuple
+    
+    keep_out_radius = 5 #keep out degrees from the sun
+    sunintrusions = []
+    for track,sunloc in zip(tracks, sun):
+#        if abs(track.az-sunloc.az) < keepout and abs(track.el-sunloc.el) < keepout:
+        if (track.az-sunloc.az)**2 + (track.el - sunloc.ell)**2 < keep_out_radius**2:
+            sunintrusions.append([track,sunloc])
+            print('intrusion into sun: ')    
+            print(track)
+                
+    print('Found ' + str(len(sunintrusions)) + ' sun keep out intrusions')
+    intrusions = set([x[0].target_name for x in sunintrusions])
+    print('Targets with sun intrustions: ' + str(intrusions))
+    
+    #add stop point or drop any sun intrusion runs
+    
+    #order runs by time of observation
+    observations = set([x.target_name for x in tracks])
+    individual_tracks = []
+    time_of_individual_tracks = []
+    for observation in observations:
+        x = [record for record in tracks if record.target_name is observation]
+        individual_tracks.append(x)
+        time_of_individual_tracks.append(x[0].time)
+    time_of_individual_tracks, individual_tracks = zip(*sorted(zip(time_of_individual_tracks, individual_tracks )))
+    name_of_individual_tracks = [x[0].target_name for x in individual_tracks]
+    individual_tracks = dict(zip(name_of_individual_tracks, individual_tracks))
+    return time_of_individual_tracks, name_of_individual_tracks, individual_tracks
 
 camera_q = queue.Queue() #queue for taking a photo
 image_save_q = queue.Queue()#  queue for saving photos
-# telescope_q = queue.Queue() #queue for telescope pointing
 status_q = queue.Queue() #queue to return status items
 
-queues = {'camera_q':camera_q, 'image_save_q':image_save_q, 'telescope_q':telescope_q, 'status_q':status_q}
+queues = {'camera_q':camera_q, 'image_save_q':image_save_q, 'status_q':status_q}
 
 #figure out max command rate roboclaw can receive, build table of locations to spit out at that rate (vice real-time computations)
 
@@ -259,25 +262,12 @@ consumer_image_save.start()
 while not config.image_process_ready:
     pass
 print('consumer_image_save started')
-
-# start the producer
-# thread_tracker = Thread(target=funct_dict[mode], args=(my_locs, queues, target_name, camera_period)) #runs the mode in tracking_modes.py
-# thread_tracker.start()
-
-# while not config.tracking_ready:
-#     pass
-# print('thread_tracker started')
-
-# consumer_telescope = Thread(target=telescope_control, args=(queues,))
-# consumer_telescope.start()
-# while not config.telescope_process_ready:
-#     pass
-# print('consumer_telescope started')
-
 print('All threads started')
-statuses = []
-time = Time.now()
 
+
+
+######## start the hardware
+statuses = []
 stats, rc = telescope_control(cmd='init') #initialize telescope controller
 
 ########## start the telescope control loop
@@ -287,17 +277,29 @@ coordinate_loc = 0
 state = 'idle'
 last_print = datetime.now(timezone.utc)
 time_print_spacing = 1 #seconds between prints for waiting for a target to come in view
+time_of_individual_tracks, name_of_individual_tracks, individual_tracks = compute_target_coords(target_list = [['sun','astronomy'], ['moon','astronomy'], ['polaris','astronomy'], ['M42', 'astronomy'], ['ISS', 'satellite_tracking'] ])
 
 while not config.end_program:
     #process user commands
     keyboard = ''
 
+#things to add for GUI
+#manual +/- az/el control buttons and input numbers
+#point and shoot select start point and end point
+#display for images
+#autofocus button
+#some sort of progress bar
+#debug function to display variables of interest (especially config variables)
+
+
+#make separate functions bound to each button for each of these
     if keyboard == 'q': #Time.now() > time + timedelta(seconds = 240):
         config.end_program = True
         print('ending program due to keyboard input')
     elif keyboard == 'new_targets':
         print('Input new target list ')
-        #make the targeting a funtion where you input targets and times here
+        time_of_individual_tracks, name_of_individual_tracks, individual_tracks = compute_target_coords(target_list = [['sun','astronomy'], ['moon','astronomy'], ['polaris','astronomy'], ['M42', 'astronomy'], ['ISS', 'satellite_tracking'] ])
+
     elif keyboard == 'az':
         print(config.az_angle)
     elif keyboard == 'el':
@@ -323,7 +325,9 @@ while not config.end_program:
     else:
         print('status check')
         #check for status every n seconds    
-    
+
+
+#make this a bound always-executing function
     #perform commands
     if state == 'idle':
         continue
@@ -364,7 +368,7 @@ while not config.end_program:
         
 ##### queue managing/shutdown below
 
-    size = queues['status_q'].qsize() #check that an image is in the queue
+    size = queues['status_q'].qsize() #check that an image is in the queue (collects the camera and image save returns from their separate threads)
     if size >= 1:
         #get status_q and display message
         status = status_q.get()
@@ -372,157 +376,18 @@ while not config.end_program:
         #print(status)
     #sleep(1)
     #keyboard = input()
-    if Time.now() > time + timedelta(seconds = 60):
-        config.end_program = True
-        print('ending program due to timer')
-
-        
-    
-#    else:
-#        print('End conditions: ' + str(size) + ' ' + str((time + timedelta(seconds = 20)-Time.now()).sec) + ' s remaining')
+    # if Time.now() > time + timedelta(seconds = 60):
+    #     config.end_program = True
+    #     print('ending program due to timer')
 
 # wait for all threads to finish
-thread_tracker.join()
-print('thread_tracker join() complete')
-consumer_telescope.join()
-print('consumer_telescope join() complete')
-# consumer_image_save.join()
-# print('consumer_image_save join() complete')
-# consumer_camera.join()
-# print('consumer_camera join() complete')
-
+# thread_tracker.join()
+# print('thread_tracker join() complete')
+# consumer_telescope.join()
+# print('consumer_telescope join() complete')
+consumer_image_save.join()
+print('consumer_image_save join() complete')
+consumer_camera.join()
+print('consumer_camera join() complete')
 
 print('All threads finished')
-
-
-
-#y = [j - i for i,j in zip(config.x[:-1], config.x[1:])]
-
-# def point_and_shoot():
-#     pass
-
-# # def telescope_control(telescope_q):
-# #     import time
-# #     x = 0
-# #     while(x<10):
-# #         val = telescope_q.get()
-# #         print('telescoepe control' + str(val))
-# #         time.sleep(1) # Sleep for 3 seconds
-# #         x = x + 1
-
-# def camera_control(camera_q):
-#     import time
-#     x = 0
-#     while(x<10):
-#         print('camera control')
-#         time.sleep(1) # Sleep for 3 seconds
-#         x = x + 1
-        
-# def astronomy():
-#     import time
-#     x = 0
-#     while(x<10):
-#         print('astronomy')
-#         telescope_q.put(x)
-#         time.sleep(1) # Sleep for 3 seconds
-#         x = x + 1
-        
-
-
-# #%%
-
-# #point and shoot mode:
-# #aim at [center or top left] and raster scan as described
-# def point_and_shoot(FOV = 1000, az_steps = 10, el_steps = 5):
-# # FOV = 1000 #microradians
-# # az_steps = 10
-# # el_steps = 5
-#     for el in range (0,el_steps): #ADD: need to relate steps to FOV for decent coverage with overlaps for stitching
-#         for az in range(0,az_steps):
-#             done = False
-#             while not done:
-#                 in_postion = drive_gimbal(az,el)
-#                 if in_position:
-#                     take_picture() #filename as grid for stitching ease (0,0 to n,n)
-#                     done = True
-        
-
-    
-# #include way to scan by start/end lat/long coordinates
-    
-# #%%
-    
-# #astronomy mode:
-
-# def astronomy(target_name = 'moon'):
-#     x = 1
-#     time = datetime.now(timezone.utc)
-#     while x < 100:
-#         if     datetime.now(timezone.utc) > time + timedelta(0,5):
-            
-#             #https://docs.astropy.org/en/latest/coordinates/example_gallery_plot_obs_planning.html
-#             telescope_time = datetime.now(timezone.utc) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
-#             #end input
-            
-    
-#             #locate sky target
-#             my_loc = EarthLocation(lat=lat * u.deg, lon = long * u.deg, height = altitude * u.m)
-#             try:
-#                 target = SkyCoord.from_name(target_name) #sky objects (outside of solar system)
-#             except Exception as e:
-#                 print('could not find target, trying body search')
-#                 try:
-#                     get_body(target, Time(telescope_time), location = my_loc)
-#                 except Exception as e:
-#                     print('could not find target or body')
-#             #moon = get_body("moon", Time(telescope_time), location = my_loc)
-#             #sun = get_body("sun", Time(telescope_time), location = my_loc)
-    
-#             #need to convert moon to SkyCoord before proceeding to get alt/az
-            
-#             #altitude:  angle between the object and the observer's local horizon (0-90 deg)
-#             #aziumuth: measured from true north and increasing eastward (N = 0, E = 90, S= 180, W = 270)
-    
-#             targetaltaz = target.transform_to(AltAz(obstime=telescope_time, location=my_loc))
-#             #print(target_name + f"'s Altitude = {targetaltaz.alt:.2}")
-#             #print(target_name + f"'s Azimuth = {targetaltaz.az:.2}")
-            
-#             #adjust azimuth for position of telescope base
-#             az = targetaltaz.az.deg + compass_dir + mag_declination.d
-#             el = targetaltaz.alt.deg
-            
-#             print('az: ' + str(az) + ' ' + 'el: ' + str(el))
-#             x = x + 1
-#     #print('el: ' + str(el))
-# #%%
-# #Keep out zones (after getting desired commanded position)
-# def send_commands(az, el):
-#     #Check if will point into ground
-#     send_command = True
-#     if el < 0:
-#         send_command = False
-#         print("Keep out: pointing into ground")
-        
-#     #get sun location
-#     telescope_time = datetime.now(timezone.utc) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
-#     sun = get_body("sun", Time(telescope_time), location = my_loc)
-#     sunaltaz = sun.transform_to(AltAz(obstime=telescope_time, location=my_loc))
-#     sun_az = targetaltaz.az.deg + compass_dir + mag_declination.d
-#     sun_el = targetaltaz.alt.deg
-#     keep_out_radius = 5 #5 degree keep out radius to start
-    
-#     #Check if will point into sun
-#     if (az-sun_az)^2 + (el - sun_el)^2 < keep_out_radius^2:
-#         send_command = False
-#         print("Keep out: pointing at sun")
-    
-    
-#     if send_command:
-#         #send_the_commands()
-    
-        
-# #%%
-# #tracking mode:
-# def tracking:
-#     #realtime tracking of object in view at current moment
-#     #identify with selection or just pick thing in the center
