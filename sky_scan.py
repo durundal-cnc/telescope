@@ -38,6 +38,26 @@ import math
 import config # https://docs.python.org/3/faq/programming.html#how-do-i-share-global-variables-across-modules
 from datetime import datetime, date, timezone, timedelta
 
+#GUI tools, using Beeware
+from time import time
+from kivy.app import App
+from os.path import dirname, join
+from kivy.lang import Builder
+from kivy.properties import (
+    NumericProperty,
+    StringProperty,
+    BooleanProperty,
+    ListProperty,
+)
+from kivy.clock import Clock
+from kivy.animation import Animation
+from kivy.uix.screenmanager import Screen
+#end GUI tools
+
+
+
+
+
 
 
 #tool to align telescope images for stitching: https://astroalign.quatrope.org/en/latest/
@@ -91,62 +111,55 @@ def drop_outliers(input_list,num_stddevs=1):
 #make list of in-view satellites from location and list in/out view times for them as pre-processor to select targets
 #use class for targets with associated data?
 
-config.end_program = False #reset globals for each run
-config.az_angle = 0
-config.el_angle = 0
-config.az_in_position = False
-config.el_in_potiion = False
-config.camera_ready = False
-config.tracking_ready = False
-config.camera_process_ready = False
-config.image_process_ready = False
-config.telescope_process_ready = False
-config.coordinates = []
+def initialize_config():
+    config.end_program = False #reset globals for each run
+    config.az_angle_SV = 0
+    config.el_angle_SV = 0
+    config.az_angle_PV = 0
+    config.el_angle_PV = 0
+    config.az_in_position = False
+    config.el_in_potiion = False
+    config.camera_ready = False
+    config.camera_period = 10 #how many seconds between shots
+    config.tracking_ready = False
+    config.camera_process_ready = False
+    config.image_process_ready = False
+    config.telescope_process_ready = False
+    config.coordinates = []
+    config.roboclaw_stats = dict()
+    
+    config.x = 0 #use for quit debugging
+    
+    
+    #observation location details
+    #input location of observation
+    #lat = 47.6205 #degrees
+    #long = -122.3493 #degrees
+    #altitude = 100 #meters, I think this is all WGS ellipsoid referenced but needs checking
+    #compass_dir = 0.000 #degrees, magnetic angle from 0 az on telescope to magnetic north
+    
+    iphone = import_iphone_data()
+    lat = iphone['latitude']
+    long = iphone['longitude']
+    altitude = iphone['altitude']
+    compass_dir = iphone['compass']
+    config.lat = lat
+    config.long = long
+    
+    #compute magnetic declination 
+    geo_mag = GeoMag(coefficients_file="wmm/WMM_2025.COF")
+    telescope_time = datetime.now(timezone.utc) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
+    mag_declination = geo_mag.calculate(glat=lat, glon=long, alt=altitude/1000, time=telescope_time.year+int(telescope_time.strftime('%j'))/1000) #altitude in km for geo_mag
+    #print('Magnetic declination: ' + str(mag_declination.d))
+
+    my_locs = {'EarthLocation':EarthLocation(lat=lat * u.deg, lon = long * u.deg, height = altitude * u.m), 'compass_dir':compass_dir, 'mag_declination':mag_declination}
+    config.my_locs = my_locs
+    config.mag_declination = mag_declination
+    config.compass_dir = compass_dir
+    
+    #end user inputs (this should live in GUI someday)
 
 
-
-config.x = 0 #use for quit debugging
-
-
-#observation location details
-#input location of observation
-#lat = 47.6205 #degrees
-#long = -122.3493 #degrees
-#altitude = 100 #meters, I think this is all WGS ellipsoid referenced but needs checking
-#compass_dir = 0.000 #degrees, magnetic angle from 0 az on telescope to magnetic north
-
-iphone = import_iphone_data()
-lat = iphone['latitude']
-long = iphone['longitude']
-altitude = iphone['altitude']
-compass_dir = iphone['compass']
-config.lat = lat
-config.long = long
-
-#compute magnetic declination 
-geo_mag = GeoMag(coefficients_file="wmm/WMM_2025.COF")
-telescope_time = datetime.now(timezone.utc) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
-mag_declination = geo_mag.calculate(glat=lat, glon=long, alt=altitude/1000, time=telescope_time.year+int(telescope_time.strftime('%j'))/1000) #altitude in km for geo_mag
-#print('Magnetic declination: ' + str(mag_declination.d))
-target_name = 'ISS' #'Starlink-4727' #'M33' 'sun' 'moon 'SDO' 'ISS'
-mode = 'satellite_tracking' #point and shoot, satellite tracking, astronomy
-camera_period = 10 #how many seconds between shots
-target_time_start = datetime.now()
-target_time_end = datetime.now() + timedelta(hours=1)
-timespacing = timedelta(seconds=1)
-
-my_locs = {'EarthLocation':EarthLocation(lat=lat * u.deg, lon = long * u.deg, height = altitude * u.m), 'compass_dir':compass_dir, 'mag_declination':mag_declination}
-config.my_locs = my_locs
-config.mag_declination = mag_declination
-config.compass_dir = compass_dir
-
-#end user inputs (this should live in GUI someday)
-
-target_track = namedtuple('target_track', ['target_name', 'time', 'az', 'el']) #think through how this should be organized - basic lists, dicts, other?
-# from collections import namedtuple
-# Point = namedtuple('Point', 'x y')
-# pt1 = Point(1.0, 5.0)
-# pt2 = Point(2.5, 1.5)
 
 ######## start the GUI
 
@@ -239,6 +252,15 @@ def compute_target_coords(target_list = [['sun','astronomy'], ['moon','astronomy
     name_of_individual_tracks = [x[0].target_name for x in individual_tracks]
     individual_tracks = dict(zip(name_of_individual_tracks, individual_tracks))
     return time_of_individual_tracks, name_of_individual_tracks, individual_tracks
+
+
+target_track = namedtuple('target_track', ['target_name', 'time', 'az', 'el']) #think through how this should be organized - basic lists, dicts, other?
+initialize_config()
+# from collections import namedtuple
+# Point = namedtuple('Point', 'x y')
+# pt1 = Point(1.0, 5.0)
+# pt2 = Point(2.5, 1.5)
+
 
 camera_q = queue.Queue() #queue for taking a photo
 image_save_q = queue.Queue()#  queue for saving photos
