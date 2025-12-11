@@ -10,58 +10,65 @@ from roboclaw_3 import Roboclaw
 import math
 import config # https://docs.python.org/3/faq/programming.html#how-do-i-share-global-variables-across-modules
 from datetime import datetime, date, timezone, timedelta
-
 #All target/location variables are in degrees and convereted to counts for interacting with the motors
 
 def is_set(x, n): #get a specific bit from a byte
     # a more bitwise- and performance-friendly version:
     return x & 1 << n != 0
 
+def normalize_360(angle): #compute difference in angles with wraparound
+    return (angle % 360) + 360
 
-def telescope_control(rc = '', cmd = 'noop', coord = [time_of_coords, az_SV, el_SV]):
-    stats = ''
+#def telescope_control(rc = '', cmd = 'noop', coord = [time_of_coords, az_SV, el_SV]): #arg names for reference
+def telescope_control(rc = '', cmd = 'noop', coord = [datetime.now(timezone.utc), 0.0, 0.0]):
+
+    az_SV = coord[1]
+    el_SV = coord[2]
+    
+    robo_connected = False #use for debugging when roboclaw not connected
+
+    #time_of_coords not actually used here but useful for debugging
+    stats = '' #was planning on returning stats but putting them in config. instead
+    
+    az_encoder_cpr = 4000
+    az_gearbox = 100 #75:1 on pololu website
+    az_belt = 60/20 #number of teeth on large pulley/number of teeth on small pulley
+    
+    # el_encoder_cpr = 48
+    # el_gearbox = 74.8317777777 #75:1 on pololu website
+    # el_belt = 80/10
+    
+    el_encoder_cpr = 4000 #1000 pulse/rev with quadrature
+    el_gearbox = 100 #harmonic drive
+    el_belt = 60/20
+    
+    az_counts_per_rev = az_encoder_cpr * az_gearbox * az_belt
+    az_arcsec_per_count = 60*60 * 360/az_counts_per_rev #for reference
+    el_counts_per_rev = el_encoder_cpr * el_gearbox * el_belt
+    el_arcsec_per_count = 60*60 * 360/el_counts_per_rev #for reference
+    
+    deadband_counts = 10
+    az_backlash = 0 #needs measurement
+    el_backlash = 0 #needs measurement
+    az_accel = 100000 #counts/sec^2
+    az_speed_SV = 40000#counts/sec #max is 240k
+    az_deccel = 100000#counts/sec^2
+    el_accel = 100000#counts/sec^2
+    el_speed_SV = 40000#counts/sec
+    el_deccel = 100000#counts/sec^2
+
+
+    
     if cmd == 'init':
         print('initializing roboclaw')
         #M1 = az
         #M2 = el
-    
-        az_encoder_cpr = 4000
-        az_gearbox = 100 #75:1 on pololu website
-        az_belt = 60/20 #number of teeth on large pulley/number of teeth on small pulley
-        
-        # el_encoder_cpr = 48
-        # el_gearbox = 74.8317777777 #75:1 on pololu website
-        # el_belt = 80/10
-        
-        el_encoder_cpr = 4000 #1000 pulse/rev with quadrature
-        el_gearbox = 100 #harmonic drive
-        el_belt = 60/20
-        
-        az_counts_per_rev = az_encoder_cpr * az_gearbox * az_belt
-        az_arcsec_per_count = 60*60 * 360/az_counts_per_rev #for reference
-        el_counts_per_rev = el_encoder_cpr * el_gearbox * el_belt
-        el_arcsec_per_count = 60*60 * 360/el_counts_per_rev #for reference
-        
-        deadband_counts = 10
-        az_backlash = 0 #needs measurement
-        el_backlash = 0 #needs measurement
-        az_accel = 100000 #counts/sec^2
-        az_speed_SV = 40000#counts/sec #max is 240k
-        az_deccel = 100000#counts/sec^2
-        el_accel = 100000#counts/sec^2
-        el_speed_SV = 40000#counts/sec
-        el_deccel = 100000#counts/sec^2
-    
-        stats = {'test':'test'}
-        
-        robo_connected = True
-        run = True #send the command to the controller
         
         if not robo_connected:
-            Bit1_az = 0 #testing only
-            Bit1_el = 0 #testing only
-            az_encoder_value = 0 #counts, replace with read function
-            el_encoder_value = 0 #counts, replace with read function
+            config.Bit1_az = 0 #testing only
+            config.Bit1_el = 0 #testing only
+            config.az_encoder_value = 0 #counts, replace with read function
+            config.el_encoder_value = 0 #counts, replace with read function
             
         if robo_connected:
     
@@ -191,7 +198,7 @@ def telescope_control(rc = '', cmd = 'noop', coord = [time_of_coords, az_SV, el_
             {'Speed_Error_Limit_Warning' : status & 0x01000000},
             {'Position_Error_Limit_Warning' : status & 0x02000000}]
             [print(stat) for stat in status_list if list(stat.values())[0] != 0]
-    
+            config.error_conds = status_list #store for display in the GUI
     #############testing
     
             # # rc.ReadEncoderModes(address)
@@ -238,17 +245,19 @@ def telescope_control(rc = '', cmd = 'noop', coord = [time_of_coords, az_SV, el_
     if robo_connected:
         #read state
         az_encoder_value = rc.ReadEncM1(address) #Receive: [Enc1(4 bytes), Status, CRC(2 bytes)]
-        Bit1_az = is_set(az_encoder_value[1], 1)
+        config.Bit1_az = is_set(az_encoder_value[1], 1)
         az_encoder_value = az_encoder_value[1]
         print('az encoder is ' + str(az_encoder_value))
 
         el_encoder_value = rc.ReadEncM2(address)
-        Bit1_el = is_set(el_encoder_value[1], 1)
+        config.Bit1_el = is_set(el_encoder_value[1], 1)
         el_encoder_value = el_encoder_value[1]
         print('el encoder is ' + str(el_encoder_value))
 
         az_speed_PV = rc.ReadSpeedM1(address)[1] #status bit here also can tell speed (duplicate of ReadEncM1/2)
         el_speed_PV = rc.ReadSpeedM2(address)[1]
+        config.az_speed = az_speed_PV
+        config.el_speed = el_speed_PV
         
         # # get M1 current, get M2 current (10mA increments)
         az_current, el_current = rc.ReadCurrents(address)[1:]
@@ -260,6 +269,9 @@ def telescope_control(rc = '', cmd = 'noop', coord = [time_of_coords, az_SV, el_
         #get sun location at time from  config.coordinates.append({'az':aa.az.deg, 'el':aa.alt.deg, 'sun_az':sun_az, 'sun_el':sun_el, 'time':t})
         #if close to sun:
         #    run = False
+    else: #not connected so just read last position recorded
+        az_encoder_value = config.az_encoder_value
+        el_encoder_value = config.el_encoder_value 
     
     output_str = ''
     #read status
@@ -268,17 +280,24 @@ def telescope_control(rc = '', cmd = 'noop', coord = [time_of_coords, az_SV, el_
     # Bit1 - Direction (0 = Forward, 1 = Backwards)
     # Bit2 - Counter Overflow (1= Underflow Occurred, Clear After Reading)
     
-    old_az_dir = Bit1_az #see if we have reversed the motors, and add backlash compensation if so
+    old_az_dir = config.Bit1_az #see if we have reversed the motors, and add backlash compensation if so
     if old_az_dir == 0:
         old_az_dir == -1 #used for backlash
         
-    old_el_dir = Bit1_el
+    old_el_dir = config.Bit1_el
     if old_el_dir == 0:
         old_el_dir == -1 #used for backlash
     
+    config.az_encoder_value = az_encoder_value
+    config.el_encoder_value = el_encoder_value
 
-    config.az_angle = 360*az_encoder_value/az_counts_per_rev #update global angle value
-    config.el_angle = 360*el_encoder_value/el_counts_per_rev #update global angle value
+    config.az_angle_PV = (360*az_encoder_value/az_counts_per_rev)%360 #update global angle value
+    config.el_angle_PV = (360*el_encoder_value/el_counts_per_rev)%360 #update global angle value
+    
+    config.az_pointing_error = normalize_360(az_SV) - normalize_360(config.az_angle_PV) #need to fix for wraparound
+    config.el_pointing_error = normalize_360(el_SV) - normalize_360(config.el_angle_PV)
+    config.total_pointing_error =  ((normalize_360(az_SV)-normalize_360(config.az_angle_PV) )**2 + (normalize_360(el_SV) - normalize_360(config.el_angle_PV))**2) ** 0.5
+
     
     # if len(config.coordinates) > 0:
     #     print('Reading ' + str(len(config.coordinates)) + ' coordinates')
@@ -464,60 +483,67 @@ def telescope_control(rc = '', cmd = 'noop', coord = [time_of_coords, az_SV, el_
         print(e)
             
 
-    if run:
-        try:
-            #send the new command destinations
-            
-            if robo_connected:
-                #The Buffer argument can be set to a 1 or 0. If a value of 0 is used the command will be buffered
-                #and executed in the order sent. If a value of 1 is used the current running command is stopped,
-                #any other commands in the buffer are deleted and the new command is executed
-                buffer = 1
-                print('az_accel' + str(az_accel))
-                print('az_speed' + str(az_speed_SV))
-                print('az_deccel' + str(az_deccel))
-                print('az_dest_counts' + str(az_dest_counts))
-                az_dest_counts = round(az_dest_counts) #processes as a float but controller only does ints
-                print('az_dest_counts' + str(az_dest_counts))
-                el_dest_counts = round(el_dest_counts)
+    try:
+        #send the new command destinations
+        
+        if robo_connected:
+            #The Buffer argument can be set to a 1 or 0. If a value of 0 is used the command will be buffered
+            #and executed in the order sent. If a value of 1 is used the current running command is stopped,
+            #any other commands in the buffer are deleted and the new command is executed
+            buffer = 1
+            print('az_accel' + str(az_accel))
+            print('az_speed' + str(az_speed_SV))
+            print('az_deccel' + str(az_deccel))
+            print('az_dest_counts' + str(az_dest_counts))
+            az_dest_counts = round(az_dest_counts) #processes as a float but controller only does ints
+            print('az_dest_counts' + str(az_dest_counts))
+            el_dest_counts = round(el_dest_counts)
 
 
-                #if distance > some constant, slew fast
-                #then
-                #get current point and new point timestamps and distances
-                #set speed to match
-                #drive to new point
-                #remove old point from list
-                #repeat
+            #if distance > some constant, slew fast
+            #then
+            #get current point and new point timestamps and distances
+            #set speed to match
+            #drive to new point
+            #remove old point from list
+            #repeat
 
 
-                rc.SpeedAccelDeccelPositionM1(address, az_accel, az_speed_SV, az_deccel, az_dest_counts, buffer) #(address, accel, speed, deccel, position, buffer)
-                rc.SpeedAccelDeccelPositionM2(address, el_accel, el_speed_SV, el_deccel, el_dest_counts, buffer)
+            rc.SpeedAccelDeccelPositionM1(address, az_accel, az_speed_SV, az_deccel, az_dest_counts, buffer) #(address, accel, speed, deccel, position, buffer)
+            rc.SpeedAccelDeccelPositionM2(address, el_accel, el_speed_SV, el_deccel, el_dest_counts, buffer)
+        else:
+            #testing start (virtual controller)
+            if az_dest_counts > az_encoder_value:
+                az_encoder_value = az_encoder_value + 500
+                config.Bit1_az = 0
+            elif az_dest_counts < az_encoder_value:
+                az_encoder_value = az_encoder_value - 500
+                config.Bit1_az = 1
+
             else:
-                #testing start (virtual controller)
-                if az_dest_counts > az_encoder_value:
-                    az_encoder_value = az_encoder_value + 50
-                    Bit1_az = 0
-                elif az_dest_counts < az_encoder_value:
-                    az_encoder_value = az_encoder_value - 50
-                    Bit1_az = 1
-    
-                else:
-                    continue #already in location
-                    
-                if el_dest_counts > el_encoder_value:
-                    el_encoder_value = el_encoder_value + 50
-                    Bit1_el = 0
-                elif el_dest_counts < el_encoder_value:
-                    el_encoder_value = el_encoder_value - 50
-                    Bit1_el = 1
-                else:
-                    continue #already in location
-                output_str = output_str + str(Bit1_az) + ' '  + str(Bit1_el)
-                #debug print('3 Az current ' + str(az_encoder_value) + ' Az dest ' + str(az_dest_counts) + ' El current ' + str(el_encoder_value) + ' El dest ' + str(el_dest_counts))
-                #testing end
-        except Exception as e:
-            print(e)
+                print('Az already in location')
+                
+            #print('#####before el_encoder_value: ' + str(el_encoder_value) + ' el_dest_counts: ' + str(el_dest_counts) + 'config.el_angle_PV: ' + str(config.el_angle_PV))
+                
+            if el_dest_counts > el_encoder_value:
+                el_encoder_value = el_encoder_value + 500
+                config.Bit1_el = 0
+            elif el_dest_counts < el_encoder_value:
+                el_encoder_value = el_encoder_value - 500
+                config.Bit1_el = 1
+            else:
+                print('El already in location')
+            
+            #print('#####after el_encoder_value: ' + str(el_encoder_value) + ' el_dest_counts: ' + str(el_dest_counts) + 'config.el_angle_PV: ' + str(config.el_angle_PV))
+
+            config.az_encoder_value = az_encoder_value
+            config.el_encoder_value = el_encoder_value
+            
+            output_str = output_str + str(config.Bit1_az) + ' '  + str(config.Bit1_el)
+            #debug print('3 Az current ' + str(az_encoder_value) + ' Az dest ' + str(az_dest_counts) + ' El current ' + str(el_encoder_value) + ' El dest ' + str(el_dest_counts))
+            #testing end
+    except Exception as e:
+        print(e)
         
     ###### End checks and motor drive commands
 

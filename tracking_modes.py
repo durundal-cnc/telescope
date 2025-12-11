@@ -55,7 +55,7 @@ def point_and_shoot(my_loc, queues, FOV = 1, az_steps = 10, el_steps = 5): #unit
 #include way to scan by start/end lat/long coordinates
 
 #astronomy mode:
-def astronomy(my_locs, target_name = 'moon', timespacing = timedelta(seconds=1), timestart = datetime.now(timezone.utc), timeend = datetime.now(timezone.utc) + timedelta(seconds=60)):
+def astronomy(my_locs, target_name = 'moon', timespacing = timedelta(seconds=1), timestart = datetime.now(timezone.utc), timeend = datetime.now(timezone.utc) + timedelta(seconds=10)):
     # import config # https://docs.python.org/3/faq/programming.html#how-do-i-share-global-variables-across-modules
 
     # import astropy.units as u
@@ -65,6 +65,8 @@ def astronomy(my_locs, target_name = 'moon', timespacing = timedelta(seconds=1),
     # from pygeomag import GeoMag
     
     print('Starting astronomy thread')
+    print('Start time: ' + str(timestart))
+    print('End time:   ' + str(timeend))
     
     target_time_az_el_list = []
     
@@ -73,7 +75,7 @@ def astronomy(my_locs, target_name = 'moon', timespacing = timedelta(seconds=1),
     my_loc = my_locs['EarthLocation']
     
     x = 1
-    time_old = datetime.now(timezone.utc)
+    #time_old = datetime.now(timezone.utc)
     
     #locate sky target
     try:
@@ -81,7 +83,7 @@ def astronomy(my_locs, target_name = 'moon', timespacing = timedelta(seconds=1),
     except Exception as e:
         print('could not find target, trying body search')
         try:
-            target = get_body(target_name, Time(time_old), location = my_loc) #in solar system bodies
+            target = get_body(target_name, Time(timestart), location = my_loc) #in solar system bodies
         except Exception as e:
             print('could not find target or body')
             print(e)
