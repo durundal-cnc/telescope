@@ -93,10 +93,10 @@ import sys
 #DONE fix elevation behavior around 360 degrees (e.g. handle0 negative values)
 #DONE to determine if lookup mode should be astronomy or satellite_tracking check to see if target is in NORAD csv, if so, use sat track, otherwise astronomy
 #DONE after getting close to target read the velocity when target is reached and instead of letting the position command finish issue a velocity command while waiting for the next coordinate?
-#figure out why a second track isn't working right (wrong coordinates?) without rebooting program
+#figure out why a second track isn't working right (wrong coordinates?) without rebooting program (coordinate times are in the future - only getting set on boot?)
 #figure out how to make program close gracefully
 #Fine tune the pointing during tracking so it can converge on teh right value with the lookahead keeping velocity up (or just get close enough and proceed at constant velocity if the target will be in FOV?)
-
+#Elevation SV value below 0 goes negative (no wraparound code), causes issue when halt telescope called (big swing to those coordinates)
 
 #tool to align telescope images for stitching: https://astroalign.quatrope.org/en/latest/
 
@@ -539,7 +539,7 @@ async def run_telescope(root):
                 print(config.state)
             console_str = ('Al SV: ' + str(config.az_angle_SV) + ' PV: ' + str(config.az_angle_PV) + ' enc: ' + str(config.az_encoder_value) + '\n' +
                                 'El SV: ' + str(config.el_angle_SV) + ' PV: ' + str(config.el_angle_PV) + ' enc: ' + str(config.el_encoder_value) +'\n')
-            if len(config.selected_target_coords)>1:
+            if len(config.selected_target_coords)>1 and coordinate_loc < len(config.selected_target_coords):
                 console_str = console_str + str(config.selected_target_coords[coordinate_loc])
             root.console.text = console_str
 
@@ -871,7 +871,14 @@ class MainScreen(GridLayout):
         self.engage_track.bind(on_release=engage_track_callback)
 
         def home_callback(instance):
-            config.state = 'home'
+            #config.state = 'home'
+            filename = datetime.now().strftime("%Y-%m-%d %H_%M_%S.%f")+".txt"
+            folder = '/Users/andrewmiller/telescope/logs'
+            with open(os.path.join(folder, filename), "w") as text_file:
+                header = ('datetime,az_SV,el_SV,az_dest_counts,el_dest_counts,az_speed_SV,el_speed_SV,az_speed_SV_counts,el_speed_SV_counts,config.az_pointing_error,config.el_pointing_error,lookahead' + '\n')
+                text_file.write(header)
+                text_file.write(config.log)
+            print('Done writing log')
         self.home = Button(text='Home', size_hint_y= None) #this is the main button for the dropdown (which contains other buttons and is hidden)
         self.home.bind(on_release=home_callback)
 

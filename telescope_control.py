@@ -388,8 +388,9 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
         
         #scale between az_speed_SV and az_speed_max as function of pointing error. Error = 0, az_speed_SV, error > n az_speed max, n<error >0 scake it
         allowable_error = 2 #deg
-        az_speed_SV = max(az_speed_SV, (config.az_pointing_error/allowable_error)*(az_speed_max))
-        el_speed_SV = max(el_speed_SV, (config.el_pointing_error/allowable_error)*(el_speed_max))
+        #known issue: will issue an instantaneous blip of high speed when rolls over from 360 to 0 
+        az_speed_SV = max(az_speed_SV, abs(config.az_pointing_error/allowable_error)*(az_speed_max))
+        el_speed_SV = max(el_speed_SV, abs(config.el_pointing_error/allowable_error)*(el_speed_max))
 
         # if abs(config.az_pointing_error) > 2: #1000 tbd, need to adjust to something appropriate based on measurements
         #     az_speed_SV = az_speed_max
@@ -608,9 +609,9 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
             #drive to new point
             #remove old point from list
             #repeat
-
-            config.log = (config.log + str(datetime.now(timezone.utc)) + ',' + str(az_dest_counts) + ',' + str(el_dest_counts) + ',' + str(az_speed_SV_counts) + ',' + str(el_speed_SV_counts) + ','
-                         + str(config.az_pointing_error) + ',' + str(config.el_pointing_error))
+            if cmd == 'move_az_el': #keep log file size reasonable
+                config.log = (config.log + str(datetime.now(timezone.utc)) + ',' + str(az_SV) + ',' + str(el_SV) + ',' +  str(az_dest_counts) + ',' + str(el_dest_counts) + ',' + str(az_speed_SV) + ',' + str(el_speed_SV) + ',' + str(az_speed_SV_counts) + ',' + str(el_speed_SV_counts) + ','
+                         + str(config.az_pointing_error) + ',' + str(config.el_pointing_error) + ',' + str(lookahead) + '\n')
 
 
             if cmd == 'home_motors' or cmd == 'move_az_el' or cmd == 'hold':

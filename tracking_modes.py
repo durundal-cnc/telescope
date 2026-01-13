@@ -23,7 +23,7 @@ from astropy import coordinates as coord
 from spacetrack import SpaceTrackClient #this pulls the TLE from a satellite database
 
 import pandas as pd
- 
+import os
         
 #point and shoot mode:
 #aim at [center or top left] and raster scan as described
@@ -241,7 +241,13 @@ def satellite_tracking(my_locs, target_name = 'ISS', timespacing = timedelta(sec
     # from spacetrack import SpaceTrackClient #this pulls the TLE from a satellite database
     try:
         print('Connecting to Spacetrack')
-        st = SpaceTrackClient('andymiller@gmail.com', 'spacetrackpassword')
+        folder = '/Users/andrewmiller/telescope/'
+        file = 'spacetrack_credentials.txt'
+        with open(os.path.join(folder, file), 'r') as file:
+            lines = [line.rstrip() for line in file]
+            client = lines[0]
+            password = lines[1]
+        st = SpaceTrackClient(client,password)
         print('Spacetrack TLE: ')
         #print(st.gp(norad_cat_id=[25544, 41335], format='tle')) #can get more than one TLE but not doing that here
         x = st.gp(norad_cat_id=[norad_cat_id], format='tle')
