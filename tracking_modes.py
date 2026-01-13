@@ -64,7 +64,7 @@ def astronomy(my_locs, target_name = 'moon', timespacing = timedelta(seconds=1),
     # from astropy.coordinates import AltAz, EarthLocation, SkyCoord, get_body, get_sun
     # from pygeomag import GeoMag
     
-    print('Starting astronomy thread')
+    print('Starting astronomy thread, target name is ' + target_name)
     print('Start time: ' + str(timestart))
     print('End time:   ' + str(timeend))
     
@@ -87,6 +87,7 @@ def astronomy(my_locs, target_name = 'moon', timespacing = timedelta(seconds=1),
         except Exception as e:
             print('could not find target or body')
             print(e)
+            return ['Astronomy object not found']
 #            return ['invalid', 0, 0]
     #moon = get_body("moon", Time(telescope_time), location = my_loc)
     #sun = get_body("sun", Time(telescope_time), location = my_loc)
@@ -115,16 +116,16 @@ def astronomy(my_locs, target_name = 'moon', timespacing = timedelta(seconds=1),
         
         print('az: ' + str(az) + ' ' + 'el: ' + str(el))
         x = x + 1
-        target_time_az_el_list.append([target_name, telescope_time, az, el])
+        target_time_az_el_list.append([target_name, telescope_time, az, el, 0, 0]) #trailing zeros are the placeholder velocities, computed outside of this function
         
         telescope_time = telescope_time + timespacing#Time.now() #datetime.now(timezone.utc) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
 
     return target_time_az_el_list
     print('Terminated astronomy thread')
 
-def satellite_tracking(my_locs, target_name = 'ISS', timespacing = timedelta(seconds=1), timestart = datetime.now(timezone.utc), timeend = None):
+def satellite_tracking(my_locs, target_name = 'ISS', timespacing = timedelta(seconds=1), timestart = datetime.now(timezone.utc), timeend = datetime.now(timezone.utc) + timedelta(seconds=10)):
 
-    
+    print('Starting satellite_tracking, target is ' +target_name)
     #if this is too slow, make a table to timetagged angles to run through instead of trying to calculate in realtime?
     
     # import config # https://docs.python.org/3/faq/programming.html#how-do-i-share-global-variables-across-modules
@@ -138,6 +139,7 @@ def satellite_tracking(my_locs, target_name = 'ISS', timespacing = timedelta(sec
     #load local copy of NORAD satellite list and find NORAD catid by name
     norad = pd.read_csv(r'/Users/andrewmiller/telescope/satcat.csv')
     #if target_name is only digits assume this is the NORAD catalog ID
+    target_name_original = target_name
     target_name = target_name.upper() #NORAD catalog is allcaps
     print('Desired target name is ' + target_name)
     if target_name.isdigit():
@@ -146,23 +148,46 @@ def satellite_tracking(my_locs, target_name = 'ISS', timespacing = timedelta(sec
         print(norad[['OBJECT_NAME', 'OBJECT_ID', 'NORAD_CAT_ID']].loc[norad['NORAD_CAT_ID']==(int(target_name))].to_string(index=False))
 
     else:
+        #check for exact match
+        name_matches_full = norad[norad['OBJECT_NAME'].str.fullmatch(target_name)]
+        print('Found ' + str(len(name_matches_full)) + ' name_matches_full for ' + target_name)
+        print(name_matches_full)
+        #check for partial match        
         name_matches = norad[norad['OBJECT_NAME'].str.contains(target_name)]
-        if len(name_matches) <1:
+        print('Found ' + str(len(name_matches)) + ' name_matches for ' + target_name)
+        print(name_matches)
+        #if an exact match, use NORAD (search for 'moonlighter')
+        #if a partial match but not an exact match use NORAD (search for 'moo', get moonlighter)
+        #if neither use astronomy (search for 'moon')
+        if len(name_matches_full) == 1:
+            print(name_matches_full['NORAD_CAT_ID'])
+            norad_cat_id = int(name_matches_full['NORAD_CAT_ID'].iloc[0])
+            #only a single match, so return that
+        elif len(name_matches_full) < 1: #see if a full name match exists for the astronomy targets
+            #use NORAD
             print('Could not find object. May be decayed or does not exist. If a celestial body, use astronomy mode instead of satellite tracking.')
-            #return
-        nondecay_matcheds = name_matches[~name_matches['OPS_STATUS_CODE'].str.contains('D')]
-        if len(nondecay_matcheds.index)>1:
-            print('Found multiple matches for target \'' + target_name + '\', please specify which and re-run.')
-            nondecay_matcheds = nondecay_matcheds[['OBJECT_NAME', 'OBJECT_ID', 'NORAD_CAT_ID']].reset_index(drop = True)
-            print(nondecay_matcheds.to_string(index=True))
-            val = input('Please enter desired index: ')
-            print('You have selected ')
-            print(nondecay_matcheds.iloc[int(val)].to_string())
-            norad_cat_id = int(nondecay_matcheds['NORAD_CAT_ID'].iloc[int(val)]) #int(ser.iloc[0])
+            target_time_az_el_list = astronomy(my_locs, target_name_original, timespacing, timestart, timeend) #presume it's a celestial or solar system body
+            if target_time_az_el_list[0] == 'Astronomy object not found':
+                print('Could not find body in astronomy, putting in partial search of NORAD database')
+            else:
+                return target_time_az_el_list #succesfully got the values out of astronomy
+        
+        if (len(name_matches) >= 1): #multiple partial matches, don't knwo which one so display everything that isn't decayed
+            nondecay_matcheds = name_matches[~name_matches['OPS_STATUS_CODE'].str.contains('D')]
+            if len(nondecay_matcheds.index)>1:
+                print('Found multiple matches for target \'' + target_name + '\', please specify which and re-run.')
+                nondecay_matcheds = nondecay_matcheds[['OBJECT_NAME', 'OBJECT_ID', 'NORAD_CAT_ID']].reset_index(drop = True)
+                print(nondecay_matcheds.to_string(index=True))
+                val = input('Please enter desired index: ')
+                print('You have selected ')
+                print(nondecay_matcheds.iloc[int(val)].to_string())
+                norad_cat_id = int(nondecay_matcheds['NORAD_CAT_ID'].iloc[int(val)]) #int(ser.iloc[0])
+            else:
+                print(nondecay_matcheds['NORAD_CAT_ID'])
+                norad_cat_id = int(nondecay_matcheds['NORAD_CAT_ID'].iloc[0])
         else:
-            print(nondecay_matcheds['NORAD_CAT_ID'])
-            norad_cat_id = int(nondecay_matcheds['NORAD_CAT_ID'])
-
+            print('unknown object, did not find in astronomy or satellite tracking')
+    print('rolling with norad_cat_id = ' + str(norad_cat_id))
     timing = []
 
         
@@ -405,39 +430,64 @@ def satellite_tracking(my_locs, target_name = 'ISS', timespacing = timedelta(sec
     print('rise time         : ' + str(rise_time))
     print('set time          : ' + str(set_time))
     print('starting time     : ' + str(t))
-    print('uesr ending time  : ' + str(timeend))
+    print('user ending time  : ' + str(timeend))
+
+    print('pulling coordinate at time ' + str(t))
+    aa = get_az_el(Time(t)) #get the coordinates        
+    
+#moved sun checks out of here        #sun = get_body("sun", Time(t), location = my_loc)
+    #sunaltaz = sun.transform_to(AltAz(obstime=t, location=my_loc))
+    #sun_az = sunaltaz.az.deg + compass_dir + mag_declination.d
+    #sun_el = sunaltaz.alt.deg
+    #coordinates.append({'az':aa.az.deg, 'el':aa.alt.deg, 'sun_az':sun_az, 'sun_el':sun_el, 'time':t})
+    t = timestart #ignore the in view times for now, just pull coordinates for where it is at the specified time
+    while t < timeend:
+        aa = get_az_el(Time(t)) #get the coordinates        
+
+        target_time_az_el_list.append([target_name_original, t, aa.az.deg, aa.alt.deg, 0, 0]) #the trailing 0 s are velocity placeholders, to be computed outside of this function
+        print([target_name_original, t, aa.az.deg, aa.alt.deg])
+        timespacing = timedelta(seconds=0.1)
+        t = t + timespacing
+        #timespacing might need to be dynamic, adjust until the minimum spacing between angles is the encoder resolution minimum angle or some small enough value
+        #might also need to try to give it the next coodinate before it reaches the correct one or something to let it keep rolling smoothly
+        
+#    config.coordinates = coordinates #store in shared variable
 
 
-    while t < set_time: #compute the telescope time/az/el sets
-        #get az-el and time
-        if timeend is not None:
-            if t < timeend:
-                pass #wait until time is in the specified zone
-            else:
-                t = t + timespacing
-                continue
+#     while t < set_time: #compute the telescope time/az/el sets
+#         #get az-el and time
+#         if timeend is not None:
+#             if t < timeend:
+#                 pass #wait until time is in the specified zone
+#             else:
+#                 t = t + timespacing
+#                 continue
 
-        else: #before the end time or no end time specified
-            print('pulling coordinate at time ' + str(t))
-            aa = get_az_el(Time(t)) #get the coordinates        
+#         else: #before the end time or no end time specified
+#             print('pulling coordinate at time ' + str(t))
+#             aa = get_az_el(Time(t)) #get the coordinates        
             
-    #moved sun checks out of here        #sun = get_body("sun", Time(t), location = my_loc)
-            #sunaltaz = sun.transform_to(AltAz(obstime=t, location=my_loc))
-            #sun_az = sunaltaz.az.deg + compass_dir + mag_declination.d
-            #sun_el = sunaltaz.alt.deg
-            #coordinates.append({'az':aa.az.deg, 'el':aa.alt.deg, 'sun_az':sun_az, 'sun_el':sun_el, 'time':t})
-            target_time_az_el_list.append([target_name, t, aa.az.deg, aa.alt.deg])
-            print([target_name, t, aa.az.deg, aa.alt.deg])
-            t = t + timespacing
-    config.coordinates = coordinates #store in shared variable
+#     #moved sun checks out of here        #sun = get_body("sun", Time(t), location = my_loc)
+#             #sunaltaz = sun.transform_to(AltAz(obstime=t, location=my_loc))
+#             #sun_az = sunaltaz.az.deg + compass_dir + mag_declination.d
+#             #sun_el = sunaltaz.alt.deg
+#             #coordinates.append({'az':aa.az.deg, 'el':aa.alt.deg, 'sun_az':sun_az, 'sun_el':sun_el, 'time':t})
+#             target_time_az_el_list.append([target_name, t, aa.az.deg, aa.alt.deg])
+
+#             print([target_name, t, aa.az.deg, aa.alt.deg])
+#             t = t + timespacing
+# #    config.coordinates = coordinates #store in shared variable
 
     print('Completed trajectory calculations')
     mins= int((set_time - rise_time).seconds/60)
     secs = (set_time - rise_time).seconds
     print('In view time: ' + str(secs) +' seconds (' + str(mins) + ' min ' + str(secs-(60*mins)) + ' sec)')
-    
+    print(target_time_az_el_list[0])
     return target_time_az_el_list
     
+
+#%% extra functionality below
+def do_fancy_things():
 
     #check that the sun won't end up in the trajectory
     keep_out = []

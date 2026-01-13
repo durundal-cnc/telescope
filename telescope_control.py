@@ -20,12 +20,22 @@ def normalize_360(angle): #compute difference in angles with wraparound
     return (angle % 360) + 360
 
 #def telescope_control(rc = '', cmd = 'noop', coord = [time_of_coords, az_SV, el_SV]): #arg names for reference
-def telescope_control(rc = '', cmd = 'noop', coord = [datetime.now(timezone.utc), 0.0, 0.0]):
+def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.now(timezone.utc), 0.0, 0.0, 0.0, 0.0], lookahead = False):
 
+    az_speed_max = 12 #deg/sec
+    el_speed_max = 12 #deg/sec    
+
+    if len(coord) < 5: #if velocity not specified from the track use the default velocity
+        coord.append(az_speed_max)
+        coord.append(el_speed_max)
+        #print('overriding speed to max (should only happen on manual command)')
+        
     az_SV = coord[1]
     el_SV = coord[2]
+    az_speed_SV = coord[3] #deg/sec the speed that it should be moving (so it tracks and doesn't just speed away to the target coordinate faster than the target is moving)
+    el_speed_SV = coord[4] #deg/sec
     
-    robo_connected = False #use for debugging when roboclaw not connected
+    robo_connected = True #use for debugging when roboclaw not connected
 
     #time_of_coords not actually used here but useful for debugging
     stats = '' #was planning on returning stats but putting them in config. instead
@@ -47,15 +57,30 @@ def telescope_control(rc = '', cmd = 'noop', coord = [datetime.now(timezone.utc)
     el_counts_per_rev = el_encoder_cpr * el_gearbox * el_belt
     el_arcsec_per_count = 60*60 * 360/el_counts_per_rev #for reference
     
+    az_speed_SV_counts = 0 #initialize
+    el_speed_SV_counts = 0
+    
     deadband_counts = 10
     az_backlash = 0 #needs measurement
     el_backlash = 0 #needs measurement
-    az_accel = 100000 #counts/sec^2
-    az_speed_SV = 40000#counts/sec #max is 240k
-    az_deccel = 100000#counts/sec^2
-    el_accel = 100000#counts/sec^2
-    el_speed_SV = 40000#counts/sec
-    el_deccel = 100000#counts/sec^2
+    az_accel = 1000000 #counts/sec^2
+    az_speed_SV_max = 40000#counts/sec #max is 240k
+    #az_speed_SV = az_speed_SV * az_counts_per_rev * (1/360) #(deg/sec * counts/rev * 1rev/360 deg)
+    az_deccel = 1000000#counts/sec^2
+    el_accel = 1000000#counts/sec^2
+    el_speed_SV_max = 40000#counts/sec
+    #el_speed_SV = el_speed_SV * el_counts_per_rev * (1/360)
+    el_deccel = 1000000#counts/sec^2
+
+
+
+#very slow and step-y with a 1/sec coordinate delivery
+    # az_accel = 100000 #counts/sec^2
+    # az_speed_SV = 40000#counts/sec #max is 240k
+    # az_deccel = 100000#counts/sec^2
+    # el_accel = 100000#counts/sec^2
+    # el_speed_SV = 40000#counts/sec
+    # el_deccel = 100000#counts/sec^2
 
 
     
@@ -79,7 +104,10 @@ def telescope_control(rc = '', cmd = 'noop', coord = [datetime.now(timezone.utc)
                 #Windows comport name
                 #rc = Roboclaw("COM4",38400)
                 #Linux comport name
-                rc = Roboclaw("/dev/tty.usbmodem1101",38400)
+                #rc = Roboclaw("/dev/tty.usbmodem1101",38400)
+                #rc = Roboclaw("/dev/tty.usbmodem212301",38400)
+                rc = Roboclaw("/dev/tty.usbmodem111201", 38400)
+
                 roboclaw_success = rc.Open()
     
                 address = 0x80 #decimal 128
@@ -97,10 +125,13 @@ def telescope_control(rc = '', cmd = 'noop', coord = [datetime.now(timezone.utc)
                 else:
                     reconnect = False
     
-    
-            # # set M1 & M2 enc (to 4294967295 max range, but is signed))
+    #this error means it's not plugged in to the USB: AttributeError: 'Roboclaw' object has no attribute '_port'
+    #the bus power to the roboclaw needs to be supplied after USB is plugged in, otherwise won't run
+            # # set M1 & M2 enc (to 2**32 = 4294967295 max range, but is signed))
             print('Setting encoder to 0')
-            rc.SetEncM1(address,0)
+            #rc.SetEncM1(address,int(2**32/2)) #Not sure how/if Roboclaw handles encoder wraparound. Might need to reset encoder value as it nears either side evenutally
+            #rc.SetEncM2(address,int(2**32/2))
+            rc.SetEncM1(address,0) #Not sure how/if Roboclaw handles encoder wraparound. Might need to reset encoder value as it nears either side evenutally
             rc.SetEncM2(address,0)
             
             print('Setting encoder directions')
@@ -150,8 +181,8 @@ def telescope_control(rc = '', cmd = 'noop', coord = [datetime.now(timezone.utc)
             D = 540
             deadzone = 4
             max_I = 2617
-            min_pos = 0
-            max_pos = 2000000
+            min_pos = -1073741824 #this is the minimum encoder position (doesn't roll over here, just stops)
+            max_pos = 1073741824
             print('Set position PID')
             rc.SetM1PositionPID(address, P, I, D, max_I, deadzone, min_pos, max_pos)
             
@@ -164,8 +195,8 @@ def telescope_control(rc = '', cmd = 'noop', coord = [datetime.now(timezone.utc)
             D = 540
             deadzone = 0
             max_I = 2617
-            min_pos = 0 #negative values here seem to cause undefined behavior (though not in motion studio)
-            max_pos = 2000000
+            min_pos = -1073741824 #negative values here seem to cause undefined behavior (though not in motion studio? Or maybe only if out of range?)
+            max_pos = 1073741824
             print('Set position PID')
             rc.SetM2PositionPID(address, P, I, D, max_I, deadzone, min_pos, max_pos)
             
@@ -230,7 +261,7 @@ def telescope_control(rc = '', cmd = 'noop', coord = [datetime.now(timezone.utc)
     
     ##############testing
         print('roboclaw init complete')
-        return stats, rc
+        return stats, rc, address
 
 
     #queue commands
@@ -247,12 +278,12 @@ def telescope_control(rc = '', cmd = 'noop', coord = [datetime.now(timezone.utc)
         az_encoder_value = rc.ReadEncM1(address) #Receive: [Enc1(4 bytes), Status, CRC(2 bytes)]
         config.Bit1_az = is_set(az_encoder_value[1], 1)
         az_encoder_value = az_encoder_value[1]
-        print('az encoder is ' + str(az_encoder_value))
+        #print('az encoder is ' + str(az_encoder_value))
 
         el_encoder_value = rc.ReadEncM2(address)
         config.Bit1_el = is_set(el_encoder_value[1], 1)
         el_encoder_value = el_encoder_value[1]
-        print('el encoder is ' + str(el_encoder_value))
+        #print('el encoder is ' + str(el_encoder_value))
 
         az_speed_PV = rc.ReadSpeedM1(address)[1] #status bit here also can tell speed (duplicate of ReadEncM1/2)
         el_speed_PV = rc.ReadSpeedM2(address)[1]
@@ -340,30 +371,96 @@ def telescope_control(rc = '', cmd = 'noop', coord = [datetime.now(timezone.utc)
             #record where sensor pulsed
             #move to pulse location
             #set encoder to 0
-        return stats, rc
+        return stats, rc, address
 
     elif cmd == 'noop': #no op
-        pass
+        az_dest_counts = az_SV * az_counts_per_rev / 360 #this will always be 0-360 degrees from the trajectory planner
+        el_dest_counts = el_SV * el_counts_per_rev / 360 #this will always be 0-180 degrees from the trajectory planner
+        #keep the dest_counts so the in position check can run
+        #pass
 
     elif cmd == 'move_az_el':
         #move to new az/el
-        ####get command using config.coordinates
 
-        az_dest_counts = az_SV * az_counts_per_rev / 360 #this will always be 0-360 degrees from the trajectory planner
+        #only matters for tracking, if not close to target keep velocity high
+        #this could use some finesse around the allowable overspeed vs. PID loop
+        
+        
+        #scale between az_speed_SV and az_speed_max as function of pointing error. Error = 0, az_speed_SV, error > n az_speed max, n<error >0 scake it
+        allowable_error = 2 #deg
+        az_speed_SV = max(az_speed_SV, (config.az_pointing_error/allowable_error)*(az_speed_max))
+        el_speed_SV = max(el_speed_SV, (config.el_pointing_error/allowable_error)*(el_speed_max))
+
+        # if abs(config.az_pointing_error) > 2: #1000 tbd, need to adjust to something appropriate based on measurements
+        #     az_speed_SV = az_speed_max
+        #     lookahead = False
+        # if abs(config.az_pointing_error) > 0.5 and config.az_pointing_error <= 2:
+        #     az_speed_SV = az_speed_SV * 1.5 #allow a little extra speed to catch up
+                
+        # if abs(config.el_pointing_error) > 2:
+        #     el_speed_SV = el_speed_max
+        #     lookahead = False
+        # if abs(config.el_pointing_error) > 0.5 and config.el_pointing_error <= 2:
+        #     el_speed_SV = el_speed_SV * 1.5 #allow a little extra speed to catch up
+            
+        if lookahead: #adjust for smooth motion while tracking, no action if not
+            def lookahead_adjust(angle, speed):
+                lookahead_time = 5 #seconds
+                angle = angle + (lookahead_time * speed)
+                return angle
+            
+            az_SV = lookahead_adjust(az_SV, az_speed_SV)
+            el_SV = lookahead_adjust(el_SV, el_speed_SV)       
+##### new code for wraparound
+        def shortest_around_circle(SV, PV, counts_per_rev, counts_PV):         # #determine right direction to move from current position (don't take long path around circle)    
+            #print('angle PV ' +str(PV) +' angle SV ' + str(SV))
+            positive_turn_distance = normalize_360(SV-PV)
+            negative_turn_distance = normalize_360(PV-SV)
+            #print('positive_turn_distance ' +str(positive_turn_distance) +' negative_turn_distance ' + str(negative_turn_distance))
+
+            if positive_turn_distance <= negative_turn_distance:
+                SV = counts_PV + (positive_turn_distance-360) * counts_per_rev / 360
+                new_dir = 1
+            else:
+                SV = counts_PV + (360-negative_turn_distance) * counts_per_rev/360
+                new_dir = -1            
+            #print('SV out ' + str(SV))
+
+            return (SV, new_dir)
+        
+        az_dest_counts, new_az_dir = shortest_around_circle(az_SV, config.az_angle_PV, az_counts_per_rev, az_encoder_value)  #this will always be 0-360 degrees from the trajectory planner
+        #print('az_dest_counts ' + str(az_dest_counts) + ' az_encoder_value ' + str(az_encoder_value) + ' delta ' + str(az_dest_counts - az_encoder_value) + ' az_SV ' + str(az_SV) + ' az_PV ' + str(config.az_angle_PV) +  '  az_speed_SV' + str(az_speed_SV))
+        # #testing
+        # for i in range(360):
+        #     az_SV = i
+        #     az_dest_counts, new_dir = shortest_around_circle(az_SV, config.az_angle_PV, az_counts_per_rev, az_encoder_value)  #this will always be 0-360 degrees from the trajectory planner
+        #     print(str(i) + ' ' + str("%0.0f" % az_dest_counts) +' ' +  str(new_dir))
+
+#don't want this one to do 360s?        el_dest_counts = shortest_around_circle(el_SV, config.el_angle_PV, el_counts_per_rev, el_encoder_value)  #this will always be 0-360 degrees from the trajectory planner
+
+##### end new code for wraparound
+
+#convert from angles to counts to send to controller
+#        az_dest_counts = az_SV * az_counts_per_rev / 360 #this will always be 0-360 degrees from the trajectory planner
         el_dest_counts = el_SV * el_counts_per_rev / 360 #this will always be 0-180 degrees from the trajectory planner
-        print('Issuing new coordinates to az_dest_counts '+str(az_dest_counts) + ' and el_dest_counts ' + str(el_dest_counts))
+        az_speed_SV_counts = az_speed_SV * az_counts_per_rev / 360 #(deg/sec * counts/rev * 1rev/360 deg)
+        el_speed_SV_counts = el_speed_SV * el_counts_per_rev / 360
+        
+        
+        #print('Issuing new coordinates to az_dest_counts '+str(az_dest_counts) + ' and el_dest_counts ' + str(el_dest_counts) + ' at ' + str(az_speed_SV_counts) + ', ' + str(el_speed_SV_counts))
 
-        #determine right direction to move from current position (don't take long path around circle)    
-        #don't forget about cable wrap limits!!
-        positive_move = (az_dest_counts - az_encoder_value + az_counts_per_rev) % az_counts_per_rev
-        if positive_move < (az_counts_per_rev/2):
-            #go past the wrap around point
-            az_dest_counts = az_encoder_value + positive_move
-            new_az_dir = 1
-        else:
-            #negative move
-            az_dest_counts =  az_counts_per_rev*math.floor(az_encoder_value / az_counts_per_rev) + az_dest_counts
-            new_az_dir = -1
+        # #determine right direction to move from current position (don't take long path around circle)    
+        # #don't forget about cable wrap limits!!
+        # positive_move = (az_dest_counts - az_encoder_value + az_counts_per_rev) % az_counts_per_rev
+        # if positive_move < (az_counts_per_rev/2):
+        #     #go past the wrap around point
+        #     az_dest_counts = az_encoder_value + positive_move
+        #     new_az_dir = 1
+        # else:
+        #     #negative move
+        #     az_dest_counts =  az_counts_per_rev*math.floor(az_encoder_value / az_counts_per_rev) + az_dest_counts
+        #     new_az_dir = -1
+            
         #el can't wrap around so not an issue for it
         if el_dest_counts > el_encoder_value:
             new_el_dir = 1
@@ -379,6 +476,7 @@ def telescope_control(rc = '', cmd = 'noop', coord = [datetime.now(timezone.utc)
             el_dest_counts = el_dest_counts + new_el_dir*el_backlash #            need right direction
         
     elif cmd == 'hold': #stop and maintain current position
+        print('az_dest_counts ' + str(az_dest_counts) + ' az_encoder_value ' + str(az_encoder_value) + ' delta ' + str(az_dest_counts - az_encoder_value) + ' az_SV ' + str(az_SV) + ' az_PV ' + str(config.az_angle_PV) +  '  az_speed_SV' + str(az_speed_SV))
         az_dest_counts = az_encoder_value
         el_dest_counts = el_encoder_value
         
@@ -468,19 +566,7 @@ def telescope_control(rc = '', cmd = 'noop', coord = [datetime.now(timezone.utc)
     #     #run = False
     #     output_str = output_str + '\n' + 'encoder runaway on el'
         
-    try:
-        #check if we are where we are supposed to be close enough
-        if abs(az_dest_counts - az_encoder_value) < 360*deadband_counts/az_counts_per_rev:
-            config.az_in_position = True
-        else:
-            config.az_in_position = False
-        if abs(el_dest_counts - el_encoder_value) < 360*deadband_counts/el_counts_per_rev:
-            config.el_in_position = True
-        else:
-            config.el_in_position = False
-    except Exception as e:
-        print('No destination found for telescope control to slew to!')
-        print(e)
+
             
 
     try:
@@ -491,15 +577,30 @@ def telescope_control(rc = '', cmd = 'noop', coord = [datetime.now(timezone.utc)
             #and executed in the order sent. If a value of 1 is used the current running command is stopped,
             #any other commands in the buffer are deleted and the new command is executed
             buffer = 1
-            print('az_accel' + str(az_accel))
-            print('az_speed' + str(az_speed_SV))
-            print('az_deccel' + str(az_deccel))
-            print('az_dest_counts' + str(az_dest_counts))
+            #print('az_accel' + str(az_accel))
+            #print('az_speed' + str(az_speed_SV))
+            #print('az_deccel' + str(az_deccel))
+            az_speed_SV_counts = round(az_speed_SV_counts)
+            el_speed_SV_counts = round(el_speed_SV_counts)
+            #print('az_dest_counts' + str(az_dest_counts))
             az_dest_counts = round(az_dest_counts) #processes as a float but controller only does ints
-            print('az_dest_counts' + str(az_dest_counts))
+            #print('az_dest_counts' + str(az_dest_counts))
             el_dest_counts = round(el_dest_counts)
 
-
+            try:
+                #check if we are where we are supposed to be close enough
+                if abs(az_dest_counts - az_encoder_value) < 360*deadband_counts/az_counts_per_rev:
+                    config.az_in_position = True
+                else:
+                    config.az_in_position = False
+                if abs(el_dest_counts - el_encoder_value) < 360*deadband_counts/el_counts_per_rev:
+                    config.el_in_position = True
+                else:
+                    config.el_in_position = False
+            except Exception as e:
+                print('No destination found for telescope control to slew to!')
+                print(e)
+                
             #if distance > some constant, slew fast
             #then
             #get current point and new point timestamps and distances
@@ -508,9 +609,29 @@ def telescope_control(rc = '', cmd = 'noop', coord = [datetime.now(timezone.utc)
             #remove old point from list
             #repeat
 
+            config.log = (config.log + str(datetime.now(timezone.utc)) + ',' + str(az_dest_counts) + ',' + str(el_dest_counts) + ',' + str(az_speed_SV_counts) + ',' + str(el_speed_SV_counts) + ','
+                         + str(config.az_pointing_error) + ',' + str(config.el_pointing_error))
 
-            rc.SpeedAccelDeccelPositionM1(address, az_accel, az_speed_SV, az_deccel, az_dest_counts, buffer) #(address, accel, speed, deccel, position, buffer)
-            rc.SpeedAccelDeccelPositionM2(address, el_accel, el_speed_SV, el_deccel, el_dest_counts, buffer)
+
+            if cmd == 'home_motors' or cmd == 'move_az_el' or cmd == 'hold':
+                
+                # if az_dest_counts < 0:
+                #     az_dest_counts = az_dest_counts + 2**32 #controller encoder is an unsigned int32
+                # # el_dest_counts = el_dest_counts + 2**32
+                
+                # rc.SetEncM1(address,int(2**32/8)) #Not sure how/if Roboclaw handles encoder wraparound. Might need to reset encoder value as it nears either side evenutally
+                # rc.SetEncM1(address,int(0)) #Not sure how/if Roboclaw handles encoder wraparound. Might need to reset encoder value as it nears either side evenutally
+                # val = 2000000
+                # rc.SetEncM1(address,int(val)) #Not sure how/if Roboclaw handles encoder wraparound. Might need to reset encoder value as it nears either side evenutally
+
+                
+                # az_encoder_value = rc.ReadEncM1(address) #Receive: [Enc1(4 bytes), Status, CRC(2 bytes)]
+                # config.Bit1_az = is_set(az_encoder_value[1], 1)
+                # az_encoder_value = az_encoder_value[1]
+                # print(az_encoder_value)
+        
+                rc.SpeedAccelDeccelPositionM1(address, az_accel, az_speed_SV_counts, az_deccel, az_dest_counts, buffer) #(address, accel, speed, deccel, position, buffer)
+                rc.SpeedAccelDeccelPositionM2(address, el_accel, el_speed_SV_counts, el_deccel, el_dest_counts, buffer)
         else:
             #testing start (virtual controller)
             if az_dest_counts > az_encoder_value:
@@ -543,11 +664,12 @@ def telescope_control(rc = '', cmd = 'noop', coord = [datetime.now(timezone.utc)
             #debug print('3 Az current ' + str(az_encoder_value) + ' Az dest ' + str(az_dest_counts) + ' El current ' + str(el_encoder_value) + ' El dest ' + str(el_dest_counts))
             #testing end
     except Exception as e:
+        print('whoops')
         print(e)
         
     ###### End checks and motor drive commands
 
-    return stats, rc
+    return stats, rc, address
         #include queue length to make sure not backing up
     #status_q.put({'stats':stats, 'output':output_str})
     #print('Finished telescope loop, continuing')

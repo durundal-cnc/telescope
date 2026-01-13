@@ -89,8 +89,13 @@ import sys
 
 
 
-
-
+#TO ADD
+#DONE fix elevation behavior around 360 degrees (e.g. handle0 negative values)
+#DONE to determine if lookup mode should be astronomy or satellite_tracking check to see if target is in NORAD csv, if so, use sat track, otherwise astronomy
+#DONE after getting close to target read the velocity when target is reached and instead of letting the position command finish issue a velocity command while waiting for the next coordinate?
+#figure out why a second track isn't working right (wrong coordinates?) without rebooting program
+#figure out how to make program close gracefully
+#Fine tune the pointing during tracking so it can converge on teh right value with the lookahead keeping velocity up (or just get close enough and proceed at constant velocity if the target will be in FOV?)
 
 
 #tool to align telescope images for stitching: https://astroalign.quatrope.org/en/latest/
@@ -146,13 +151,7 @@ def drop_outliers(input_list,num_stddevs=1):
 
 def initialize_config():
     config.end_program = False #reset globals for each run
-    config.az_angle_SV = 0
-    config.el_angle_SV = 0
-    config.az_angle_PV = 0
-    config.el_angle_PV = 0
-    config.az_in_position = False
-    config.el_in_potiion = False
-    config.camera_ready = False
+
     config.camera_period = 10 #how many seconds between shots
     config.tracking_ready = False
     config.camera_process_ready = False
@@ -166,7 +165,27 @@ def initialize_config():
     config.state = 'idle'
     config.selected_target_dropdown = 0
     
+    config.az_angle_SV = 0 #degrees
+    config.el_angle_SV = 0 #degrees
+    config.az_angle_PV = 0 #degrees
+    config.el_angle_PV = 0 #degrees
+    config.az_in_position = False
+    config.el_in_potiion = False
+    config.camera_ready = False
+    config.az_encoder_value = 0 #counts
+    config.el_encoder_value = 0 #counts
+    config.az_pointing_error = 0 #degrees
+    config.el_pointing_error = 0 #degrees
+    config.total_pointing_error = 0 #degrees
+    config.Bit1_az = 0 #backward/forward indicator
+    config.Bit1_el = 0 #backward/forward indicator
+    config.az_speed = 0 #counts/sec
+    config.el_speed = 0 #counts/sec
+    config.az_current = 0 #current draw in 10 mA increments
+    config.el_current = 0
+
     config.x = 0 #use for quit debugging
+    config.log = '' #store text for looking at performance
     
     
     #observation location details
@@ -224,7 +243,7 @@ def compute_target_coords(target_list = [['sun','astronomy'], ['moon','astronomy
         match mode:
             case 'satellite_tracking':
                 # Code to execute if subject matches pattern_1
-                x = satellite_tracking(config.my_locs, target_name = 'ISS', timespacing = timedelta(seconds=1), timestart = timestart, timeend = timestart + timedelta(seconds=duration))
+                x = satellite_tracking(config.my_locs, target_name = target, timespacing = timedelta(seconds=1), timestart = timestart, timeend = timestart + timedelta(seconds=duration))
     
     #need to check that time end works properly when specified           #x = satellite_tracking(my_locs, target_name = 'ISS', timespacing = timedelta(seconds=1), timestart = datetime.now(timezone.utc), timeend = datetime.now(timezone.utc) + timedelta(seconds=60))
                 tracks = tracks +[target_track(*i) for i in x]#(*i) unpacks the list as an input to the namedtuple
@@ -293,11 +312,31 @@ def compute_target_coords(target_list = [['sun','astronomy'], ['moon','astronomy
     time_of_individual_tracks, individual_tracks = zip(*sorted(zip(time_of_individual_tracks, individual_tracks )))
     name_of_individual_tracks = [x[0].target_name for x in individual_tracks]
     individual_tracks = dict(zip(name_of_individual_tracks, individual_tracks))
+    
+    def compute_velocities(track):  #get the velocities between all the points
+        if len(track)>1:
+            first_coord = track[0]
+            for idx, coord in enumerate(track[1:]):
+                print(coord)
+                delta_time = (coord.time-first_coord.time).total_seconds() #time between coords in seconds
+                track[idx] = track[idx]._replace(az_vel = abs((coord.az  - first_coord.az)/delta_time)) #deg/sec
+                track[idx] = track[idx]._replace(el_vel = abs((coord.el  - first_coord.el)/delta_time)) #deg/sec
+            track[0] = track[0]._replace(az_vel = track[1].az_vel) #assume this probably won't matter at the start of the track as it will need time to get to location and speed anyway
+            track[0] = track[0]._replace(el_vel = track[1].el_vel) #assume this probably won't matter at the start of the track as it will need time to get to location and speed anyway
+            return track
+        else:
+            print('Error: track does not have any elements in it')
+            return
+    
+    for key, value in individual_tracks.items(): #individual_tracks will have dict item for each track
+        individual_tracks[key] = compute_velocities(value) #get the velocities between all the points
+    
     return time_of_individual_tracks, name_of_individual_tracks, individual_tracks
 #time_of_individual_tracks, name_of_individual_tracks, individual_tracks =  compute_target_coords(target_list = [['sun','astronomy'], ['moon','astronomy'], ['polaris','astronomy'], ['M42', 'astronomy'], ['ISS', 'satellite_tracking'] ])
 
 
-target_track = namedtuple('target_track', ['target_name', 'time', 'az', 'el']) #think through how this should be organized - basic lists, dicts, other?
+
+target_track = namedtuple('target_track', ['target_name', 'time', 'az', 'el', 'az_vel', 'el_vel']) #think through how this should be organized - basic lists, dicts, other?
 stats = namedtuple('stats', ['az_PV', 'el_PV', 'error_conds', ]) #think through how this should be organized - basic lists, dicts, other?
 
 initialize_config() #set up location on earth and global variables
@@ -306,7 +345,6 @@ initialize_config() #set up location on earth and global variables
 # pt1 = Point(1.0, 5.0)
 # pt2 = Point(2.5, 1.5)
 
-
 # camera_q = queue.Queue() #queue for taking a photo
 # image_save_q = queue.Queue()#  queue for saving photos
 # status_q = queue.Queue() #queue to return status items
@@ -314,7 +352,6 @@ initialize_config() #set up location on earth and global variables
 # queues = {'camera_q':camera_q, 'image_save_q':image_save_q, 'status_q':status_q}
 
 # #figure out max command rate roboclaw can receive, build table of locations to spit out at that rate (vice real-time computations)
-
 
 # # start the consumers
 # consumer_camera = Thread(target=camera_control, args=(queues,)) #You need to add a comma to create a tuple, so it would be args=(item,):
@@ -360,7 +397,7 @@ async def run_telescope(root):
     do_once = True
 
     ######## start the hardware
-    stats, rc = telescope_control(cmd='init') #initialize telescope controller
+    stats, rc, address = telescope_control(cmd='init') #initialize telescope controller
 
     #the coordinates and targets are stored in root.time_of_individual_tracks, root.name_of_individual_tracks, root.individual_tracks 
 
@@ -382,25 +419,27 @@ async def run_telescope(root):
                 # print(config.x)
             else:
                 x = 0
-            root.iPhone_stats.text = str(x)
-            root.roboclaw_stats.text = str(x)
+            root.iPhone_stats.text = 'El vel' +str(config.el_speed)
+            root.roboclaw_stats.text = 'Az vel' + str(config.az_speed)
             
             root.trackprogressbar.value = coordinate_loc
             root.trackprogressbar.max = max(1, len(config.selected_target_coords))
-            
-            root.az_PV.text = str(config.az_angle_PV) #update the angle display
+            root.az_PV.text = str("%07.3f" % config.az_angle_PV) + ' (' + str("%08.3f" % config.az_pointing_error) + ')' #update the angle display
             #print('######## el PV from config: ' + str(config.el_angle_PV))
-            root.el_PV.text = str(config.el_angle_PV)
+            root.el_PV.text = str("%07.3f" % config.el_angle_PV) + ' (' + str("%08.3f" % config.el_pointing_error) + ')' #update the angle display
 
             #perform commands
             root.state_label.text = 'config.state = ' + config.state
             if config.state == 'idle':
+                #update our stats
+                stats, rc, address = telescope_control(rc, address = 0x80, cmd='noop', coord=[datetime.now(timezone.utc), config.az_angle_SV, config.el_angle_SV]) #update the PVs (done every telescope_control before command)
+                #note: can't use the textbox values because if they are deleted they will be invalid when this command gets fired off in the background
                 continue
             elif config.state == 'manual':
                 #send command for manual move
                 print('manual command issued')
                 
-                stats, rc = telescope_control(rc, cmd='move_az_el', coord=[datetime.now(timezone.utc), float(root.manual_Az.text), float(root.manual_El.text)]) #initialize telescope controller
+                stats, rc, address = telescope_control(rc, address = 0x80, cmd='move_az_el', coord=[datetime.now(timezone.utc), float(root.manual_Az.text), float(root.manual_El.text)]) #initialize telescope controller
                 config.state = 'idle' #don't keep hammering the roboclaw with the same position
 
 #something fucky is going on here, need to get the right target list (not root.select_target as that's just the dropdown parent. Use config. instead?)
@@ -460,16 +499,19 @@ async def run_telescope(root):
 
                 #need to check that we haven't run out of coordiantes first before moving to new coordinate
                 config.current_coord_loc = coordinate_loc #update so others can see global variable
-                
+                config.selected_target_coords
                 
                 if datetime.now(timezone.utc) < config.selected_target_coords[coordinate_loc].time: #this will keep the next coordinates from being sent from the caller
+                    stats, rc, address = telescope_control(rc, address=0x80,  cmd='noop', coord = [datetime.now(timezone.utc), float(root.manual_Az.text),float(root.manual_El.text)]) #update the scope PVs
+
                     if datetime.now(timezone.utc) > last_print:
                         last_print = datetime.now(timezone.utc) + timedelta(seconds=time_print_spacing)
                         print('Waiting for new coordinate in ' + str(config.selected_target_coords[coordinate_loc].time - datetime.now(timezone.utc) )+' H:M:S')
+
                     continue #wait for coordinate time to occur
                 else:
                     root.current_target_stats.text='Current target: ' +config.selected_target_coords[0].target_name
-                    print('sending ' + str(coordinate_loc) + ' of ' + str(len(config.selected_target_coords)) + 'coords for ' + config.selected_target_coords[0].target_name)           
+                    #print('sending ' + str(coordinate_loc) + ' of ' + str(len(config.selected_target_coords)) + 'coords for ' + config.selected_target_coords[0].target_name)           
 
                     config.current_coord_loc = str(coordinate_loc)
 
@@ -477,7 +519,14 @@ async def run_telescope(root):
                     #set the displays
                     root.manual_Az.text = str(config.selected_target_coords[coordinate_loc].az)
                     root.manual_El.text = str(config.selected_target_coords[coordinate_loc].el)
-                    stats, rc = telescope_control(rc, cmd='move_az_el', coord = [datetime.now(timezone.utc), float(root.manual_Az.text),float(root.manual_El.text)]) #tell telescope to stop where it is
+
+                    #to do: compute az and el angular velocities to the future coordinate and pass those through to telescope_control too
+                    #telescope control then commands a future distance n degrees away from the actual coordinate to go to, at the correct velocity
+                    #this keeps the roboclaw from initiating deceleration once it gets close to the commanded point, but before the next one is sent
+                    #add a bit in the telescope control to let it travel quickly if > 5 degrees away from the target or something
+                    
+                    
+                    stats, rc, address = telescope_control(rc, address=0x80,  cmd='move_az_el', coord = [datetime.now(timezone.utc), float(root.manual_Az.text),float(root.manual_El.text), config.selected_target_coords[coordinate_loc].az_vel, config.selected_target_coords[coordinate_loc].el_vel], lookahead = False) #tell telescope to stop where it is
                     coordinate_loc = coordinate_loc+1
                     
                     #need to take the roboclaw stats to get PV
@@ -488,8 +537,12 @@ async def run_telescope(root):
             else:
                 print('unknown state')
                 print(config.state)
-                
-            root.console.text = 'El SV: ' + str(config.el_angle_SV) + ' PV: ' + str(config.el_angle_PV) + ' enc: ' + str(config.el_encoder_value)
+            console_str = ('Al SV: ' + str(config.az_angle_SV) + ' PV: ' + str(config.az_angle_PV) + ' enc: ' + str(config.az_encoder_value) + '\n' +
+                                'El SV: ' + str(config.el_angle_SV) + ' PV: ' + str(config.el_angle_PV) + ' enc: ' + str(config.el_encoder_value) +'\n')
+            if len(config.selected_target_coords)>1:
+                console_str = console_str + str(config.selected_target_coords[coordinate_loc])
+            root.console.text = console_str
+
 
     except trio.Cancelled as e:
         print('Wasting time was canceled', e)
@@ -568,9 +621,10 @@ class MainScreen(GridLayout):
 # textinput.bind(text=on_text)
 
         def manual_Az_focus_change(instance, value):
-            print(config.x)
-            self.manual_Az.text = str( float(self.manual_Az.text) %360)
-            config.x = 'manual az config.x'
+            if self.manual_Az.text.strip(): #check against empty inputs
+                self.manual_Az.text = str( float(self.manual_Az.text) %360)
+            else:
+                self.manual_Az.text = '0.0'
 
         self.manual_Az = TextInput(multiline=False, hint_text='Manual Az (deg)', input_filter = 'float', write_tab = False) #input for numeric manual Az degrees
         self.manual_Az.text = '0.0'
@@ -579,9 +633,13 @@ class MainScreen(GridLayout):
 
 
         def manual_El_focus_change(instance, value):
-            print(config.x)
-            self.manual_El.text = str( float(self.manual_El.text) %360)
-            config.x = 'manual el config.x'
+            if self.manual_El.text.strip(): #check against empty inputs
+                self.manual_El.text = str( float(self.manual_El.text) %360) #Limit this to some bounds once limit switches/range of motion determined
+                #self.manual_El.text = str(max(0, min(180, float(self.manual_El.text))))
+
+            else:
+                self.manual_El.text = '0.0'
+            
 
         self.manual_El = TextInput(multiline=False, hint_text='Manual El (deg)', input_filter = 'float', write_tab = False) #input for numeric manual El degrees
         self.manual_El.text = '0.0'
@@ -624,12 +682,16 @@ class MainScreen(GridLayout):
             self.manual_AzEl.trigger_action(0.1) # argument is for how long button should be pressed
 
         def plus_El_callback(instance):
-            self.manual_El.text = str(float(self.manual_El.text) + 1)
+            #self.manual_El.text = str(float(self.manual_El.text) + 1)
+            self.manual_El.text = str( max(0, min(180, float(self.manual_El.text) + 1)) )
+
             print('The button <%s> is being pressed' % instance.text)
             self.manual_AzEl.trigger_action(0.1) # argument is for how long button should be pressed
 
         def minus_El_callback(instance):
-            self.manual_El.text = str(float(self.manual_El.text) - 1)
+            #self.manual_El.text = str(float(self.manual_El.text) - 1)
+            self.manual_El.text = str( max(0, min(180, float(self.manual_El.text) - 1)) )
+
             print('The button <%s> is being pressed' % instance.text)
             self.manual_AzEl.trigger_action(0.1) # argument is for how long button should be pressed
 
@@ -655,7 +717,7 @@ class MainScreen(GridLayout):
         
         self.duration_grid_layout = GridLayout(cols = 2)
         self.duration = TextInput(hint_text='Duration in sec per track', input_filter = 'float', multiline=False, write_tab=False) #numeric only, tab moves to next object instead of writing \tab
-        self.duration.text = "10"
+        self.duration.text = "1000"
         self.duration_label = Label(text='Track duration')
         self.duration_grid_layout.add_widget(self.duration)
         self.duration_grid_layout.add_widget(self.duration_label)
@@ -670,7 +732,7 @@ class MainScreen(GridLayout):
 
 
         self.target_list_textinput = TextInput(multiline=False, hint_text='List of targets', write_tab = False) #input for numeric manual El degrees
-        self.target_list_textinput.text = 'sun astronomy moon astronomy'
+        self.target_list_textinput.text = 'sun moon iss'
 
     
         self.scroll_console = ScrollView(size_hint_y= None, scroll_type = ['bars', 'content'], bar_width = 13, bar_margin = 5, height = 200)
@@ -708,16 +770,31 @@ class MainScreen(GridLayout):
 
 
         def compute_targets_callback(instance):
-            print('computing target coorindates')
+            print('computing target coordinates')
             target_list_str = self.target_list_textinput.text
             print(target_list_str)
+            
+            #check to see if astronomy mode or satellite tracking mode has been specified, if not, run them all as satellite_tracking 
             target_list = target_list_str.split() #= 'moon astronomy polaris astronomy sun astronomy ISS satellite_tracking'
-            print(target_list)
-            target_pairs = []
-            a = iter(target_list)
-            for x,y in zip(a, a):
-                target_pairs.append([x,y])
-            print(target_pairs)
+            if len(target_list) == 1: #only one item
+                target_pairs = [[target_list[0], 'satellite_tracking']]
+                print('Only one target, presume it is satellite_tracking')
+                print(target_list)
+            elif len(target_list) ==  0:
+                print('no tracks found! adding the moon so the rest of the program doesn''tbreak')
+                target_list = ['moon', satellite_tracking]
+            elif len(target_list) >= 2:
+                if target_list[1] == 'satellite_tracking' or target_list[1] == 'astronomy':
+                    #target lookup method was specified, continue
+                    
+                    print(target_list)
+                    target_pairs = []
+                    a = iter(target_list)
+                    for x,y in zip(a, a):
+                        target_pairs.append([x,y])
+                    print(target_pairs)
+                else:
+                    target_pairs = [[x, 'satellite_tracking'] for x in target_list]
 #            time_of_individual_tracks, name_of_individual_tracks, individual_tracks = compute_target_coords(target_list = target_pairs)
             #add to dropdown target selector
             
@@ -762,8 +839,8 @@ class MainScreen(GridLayout):
         def halt_telescope_callback(instance):
             print('halting telescope')
             #coerce output to 0-360
-            self.manual_Az.text = self.az_PV.text
-            self.manual_El.text = self.el_PV.text
+            self.manual_Az.text = str(config.az_angle_PV)
+            self.manual_El.text = str(config.el_angle_PV)
             config.state = 'manual'
 
         self.halt_telescope = Button(text='Halt telescope', size_hint_y = None)
@@ -799,8 +876,25 @@ class MainScreen(GridLayout):
         self.home.bind(on_release=home_callback)
 
 
-        self.select_target = Button(text='Select target', size_hint_y= None) #this is the main button for the dropdown (which contains other buttons and is hidden)
-        self.select_target.bind(on_release=self.dropdown.open)
+        def ok_button(instance):
+            print('ok pressed')
+        def cancel_button(instance):
+            print('cancel pressed')
+        self.ok_cancel_grid_layout = GridLayout(rows = 2, height = self.console.height)
+        self.ok = Button(text='OK', size_hint_y= None) #this is the main button for the dropdown (which contains other buttons and is hidden)
+        self.ok.bind(on_release=ok_button)
+        self.cancel = Button(text='Cancel', size_hint_y= None) #this is the main button for the dropdown (which contains other buttons and is hidden)
+        self.cancel.bind(on_release=cancel_button)
+        self.ok_cancel_grid_layout.add_widget(self.ok)
+        self.ok_cancel_grid_layout.add_widget(self.cancel)
+
+
+        def engage_track_callback(instance):
+            config.state = 'track'
+
+        self.engage_track = Button(text='Engage track', size_hint_y= None) #this is the main button for the dropdown (which contains other buttons and is hidden)
+        self.engage_track.bind(on_release=engage_track_callback)
+
 
         self.checkbox_grid_layout = GridLayout(cols = 2)
         def on_auto_checkbox_active(checkbox, value):
@@ -850,7 +944,8 @@ class MainScreen(GridLayout):
         
         self.add_widget(self.current_target_stats)
         self.add_widget(self.trackprogressbar) #(try to expand over 2 columns, labels as placeholders until then)
-        self.add_widget(Label(text='placeholder')) #self.add_widget(self.automanual_label)
+        self.add_widget(self.state_label)
+
 
         
         self.add_widget(self.roboclaw_stats)
@@ -863,8 +958,9 @@ class MainScreen(GridLayout):
 
         self.add_widget(self.scroll_console)
         self.add_widget(self.scroll_tracks_display)
-        self.add_widget(self.state_label)
-        
+        self.add_widget(self.ok_cancel_grid_layout)
+        #self.add_widget(Label(text='placeholder')) #self.add_widget(self.automanual_label)
+
         # self.add_widget(self.username)
         # self.add_widget(Label(text='User Name'))
         # self.add_widget(self.password)
@@ -904,9 +1000,10 @@ if __name__ == '__main__':
             at the `with` level. '''
             nursery.start_soon(run_app_GUI, root, nursery)
             nursery.start_soon(run_telescope, root)
-
+        App.stop
+        #root.close()
     trio.run(root_func)
-    
+
         
 ##### queue managing/shutdown below
 
@@ -931,5 +1028,4 @@ if __name__ == '__main__':
 # print('consumer_image_save join() complete')
 # consumer_camera.join()
 # print('consumer_camera join() complete')
-
 print('All threads finished')
