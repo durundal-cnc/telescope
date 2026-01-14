@@ -31,11 +31,13 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
         #print('overriding speed to max (should only happen on manual command)')
         
     az_SV = coord[1]
+    az_SV_input = az_SV #used for logging comparisons
     el_SV = coord[2]
+    el_SV_input = el_SV
     az_speed_SV = coord[3] #deg/sec the speed that it should be moving (so it tracks and doesn't just speed away to the target coordinate faster than the target is moving)
     el_speed_SV = coord[4] #deg/sec
     
-    robo_connected = True #use for debugging when roboclaw not connected
+    robo_connected = False #use for debugging when roboclaw not connected
 
     #time_of_coords not actually used here but useful for debugging
     stats = '' #was planning on returning stats but putting them in config. instead
@@ -325,9 +327,24 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
     config.az_angle_PV = (360*az_encoder_value/az_counts_per_rev)%360 #update global angle value
     config.el_angle_PV = (360*el_encoder_value/el_counts_per_rev)%360 #update global angle value
     
-    config.az_pointing_error = normalize_360(az_SV) - normalize_360(config.az_angle_PV) #need to fix for wraparound
-    config.el_pointing_error = normalize_360(el_SV) - normalize_360(config.el_angle_PV)
-    config.total_pointing_error =  ((normalize_360(az_SV)-normalize_360(config.az_angle_PV) )**2 + (normalize_360(el_SV) - normalize_360(config.el_angle_PV))**2) ** 0.5
+    
+    def get_angular_distance(unit1, unit2):
+        phi = abs(unit2-unit1) % 360
+        sign = 1
+        # used to calculate sign
+        if not ((unit1-unit2 >= 0 and unit1-unit2 <= 180) or (
+                unit1-unit2 <= -180 and unit1-unit2 >= -360)):
+            sign = -1
+        if phi > 180:
+            result = 360-phi
+        else:
+            result = phi
+
+        return result,sign
+    
+    config.az_pointing_error, az_pointing_error_dir = get_angular_distance(az_SV, config.az_angle_PV)
+    config.el_pointing_error, el_pointing_error_dir = get_angular_distance(el_SV, config.el_angle_PV)
+    config.total_pointing_error =  ((config.az_pointing_error)**2 + (config.el_pointing_error**2)) ** 0.5
 
     
     # if len(config.coordinates) > 0:
@@ -387,31 +404,26 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
         
         
         #scale between az_speed_SV and az_speed_max as function of pointing error. Error = 0, az_speed_SV, error > n az_speed max, n<error >0 scake it
-        allowable_error = 2 #deg
+        allowable_error = 0.1 #deg
         #known issue: will issue an instantaneous blip of high speed when rolls over from 360 to 0 
-        az_speed_SV = max(az_speed_SV, abs(config.az_pointing_error/allowable_error)*(az_speed_max))
-        el_speed_SV = max(el_speed_SV, abs(config.el_pointing_error/allowable_error)*(el_speed_max))
-
-        # if abs(config.az_pointing_error) > 2: #1000 tbd, need to adjust to something appropriate based on measurements
-        #     az_speed_SV = az_speed_max
-        #     lookahead = False
-        # if abs(config.az_pointing_error) > 0.5 and config.az_pointing_error <= 2:
-        #     az_speed_SV = az_speed_SV * 1.5 #allow a little extra speed to catch up
-                
-        # if abs(config.el_pointing_error) > 2:
-        #     el_speed_SV = el_speed_max
-        #     lookahead = False
-        # if abs(config.el_pointing_error) > 0.5 and config.el_pointing_error <= 2:
-        #     el_speed_SV = el_speed_SV * 1.5 #allow a little extra speed to catch up
+        az_speed_SV_placeholder = max(az_speed_SV, abs(config.az_pointing_error/allowable_error)*(az_speed_max)) #inelegant quick fix
+        el_speed_SV_placeholder = max(el_speed_SV, abs(config.el_pointing_error/allowable_error)*(el_speed_max))
             
-        if lookahead: #adjust for smooth motion while tracking, no action if not
+        
+        #lookahead code doesn't work smoothly (introduces jumps)
+        if lookahead: #adjust for smooth motion while tracking, no action if not. Do not engage unless close to the track's speed or it will really overshoot
             def lookahead_adjust(angle, speed):
                 lookahead_time = 5 #seconds
-                angle = angle + (lookahead_time * speed)
+                angle = (angle + (lookahead_time * speed)) % 360
                 return angle
-            
-            az_SV = lookahead_adjust(az_SV, az_speed_SV)
-            el_SV = lookahead_adjust(el_SV, el_speed_SV)       
+            fudge_factor = 1.1
+            if abs(az_speed_SV)*fudge_factor >= abs(az_speed_SV_placeholder):
+                az_SV = lookahead_adjust(az_SV, az_speed_SV)
+            if abs(el_speed_SV)*fudge_factor >= abs(el_speed_SV_placeholder):
+                el_SV = lookahead_adjust(el_SV, el_speed_SV)       
+        az_speed_SV = az_speed_SV_placeholder
+        el_speed_SV = el_speed_SV_placeholder
+        
 ##### new code for wraparound
         def shortest_around_circle(SV, PV, counts_per_rev, counts_PV):         # #determine right direction to move from current position (don't take long path around circle)    
             #print('angle PV ' +str(PV) +' angle SV ' + str(SV))
@@ -437,12 +449,10 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
         #     az_dest_counts, new_dir = shortest_around_circle(az_SV, config.az_angle_PV, az_counts_per_rev, az_encoder_value)  #this will always be 0-360 degrees from the trajectory planner
         #     print(str(i) + ' ' + str("%0.0f" % az_dest_counts) +' ' +  str(new_dir))
 
-#don't want this one to do 360s?        el_dest_counts = shortest_around_circle(el_SV, config.el_angle_PV, el_counts_per_rev, el_encoder_value)  #this will always be 0-360 degrees from the trajectory planner
 
 ##### end new code for wraparound
 
 #convert from angles to counts to send to controller
-#        az_dest_counts = az_SV * az_counts_per_rev / 360 #this will always be 0-360 degrees from the trajectory planner
         el_dest_counts = el_SV * el_counts_per_rev / 360 #this will always be 0-180 degrees from the trajectory planner
         az_speed_SV_counts = az_speed_SV * az_counts_per_rev / 360 #(deg/sec * counts/rev * 1rev/360 deg)
         el_speed_SV_counts = el_speed_SV * el_counts_per_rev / 360
@@ -450,17 +460,8 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
         
         #print('Issuing new coordinates to az_dest_counts '+str(az_dest_counts) + ' and el_dest_counts ' + str(el_dest_counts) + ' at ' + str(az_speed_SV_counts) + ', ' + str(el_speed_SV_counts))
 
-        # #determine right direction to move from current position (don't take long path around circle)    
         # #don't forget about cable wrap limits!!
-        # positive_move = (az_dest_counts - az_encoder_value + az_counts_per_rev) % az_counts_per_rev
-        # if positive_move < (az_counts_per_rev/2):
-        #     #go past the wrap around point
-        #     az_dest_counts = az_encoder_value + positive_move
-        #     new_az_dir = 1
-        # else:
-        #     #negative move
-        #     az_dest_counts =  az_counts_per_rev*math.floor(az_encoder_value / az_counts_per_rev) + az_dest_counts
-        #     new_az_dir = -1
+
             
         #el can't wrap around so not an issue for it
         if el_dest_counts > el_encoder_value:
@@ -610,7 +611,7 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
             #remove old point from list
             #repeat
             if cmd == 'move_az_el': #keep log file size reasonable
-                config.log = (config.log + str(datetime.now(timezone.utc)) + ',' + str(az_SV) + ',' + str(el_SV) + ',' +  str(az_dest_counts) + ',' + str(el_dest_counts) + ',' + str(az_speed_SV) + ',' + str(el_speed_SV) + ',' + str(az_speed_SV_counts) + ',' + str(el_speed_SV_counts) + ','
+                config.log = (config.log + str(datetime.now(timezone.utc)) + ',' + str(az_SV_input) + ',' + str(el_SV_input) + ',' + str(az_SV) + ',' + str(el_SV) + ',' +  str(config.az_angle_PV) + ',' + str(config.el_angle_PV) + ',' + str(az_dest_counts) + ',' + str(el_dest_counts) + ',' + str(az_speed_SV) + ',' + str(el_speed_SV) + ',' + str(az_speed_SV_counts) + ',' + str(el_speed_SV_counts) + ','
                          + str(config.az_pointing_error) + ',' + str(config.el_pointing_error) + ',' + str(lookahead) + '\n')
 
 
@@ -643,8 +644,8 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
                 config.Bit1_az = 1
 
             else:
-                print('Az already in location')
-                
+                #print('Az already in location')
+                pass
             #print('#####before el_encoder_value: ' + str(el_encoder_value) + ' el_dest_counts: ' + str(el_dest_counts) + 'config.el_angle_PV: ' + str(config.el_angle_PV))
                 
             if el_dest_counts > el_encoder_value:
@@ -654,8 +655,8 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
                 el_encoder_value = el_encoder_value - 500
                 config.Bit1_el = 1
             else:
-                print('El already in location')
-            
+                #print('El already in location')
+                pass
             #print('#####after el_encoder_value: ' + str(el_encoder_value) + ' el_dest_counts: ' + str(el_dest_counts) + 'config.el_angle_PV: ' + str(config.el_angle_PV))
 
             config.az_encoder_value = az_encoder_value

@@ -42,6 +42,8 @@ from datetime import datetime, date, timezone, timedelta
 #GUI tools, using Beeware
 from time import time
 from kivy.app import App
+from kivy.core.window import Window
+
 from os.path import dirname, join
 from kivy.lang import Builder
 from kivy.properties import (
@@ -85,6 +87,8 @@ from kivy.properties import (
 import re
 import sys
 
+keep_running_app = True
+
 #end GUI tools
 
 
@@ -93,10 +97,11 @@ import sys
 #DONE fix elevation behavior around 360 degrees (e.g. handle0 negative values)
 #DONE to determine if lookup mode should be astronomy or satellite_tracking check to see if target is in NORAD csv, if so, use sat track, otherwise astronomy
 #DONE after getting close to target read the velocity when target is reached and instead of letting the position command finish issue a velocity command while waiting for the next coordinate?
-#figure out why a second track isn't working right (wrong coordinates?) without rebooting program (coordinate times are in the future - only getting set on boot?)
-#figure out how to make program close gracefully
+#DONE figure out why a second track isn't working right (wrong coordinates?) without rebooting program (coordinate times are in the future - only getting set on boot?)
+#DONE figure out how to make program close gracefully
 #Fine tune the pointing during tracking so it can converge on teh right value with the lookahead keeping velocity up (or just get close enough and proceed at constant velocity if the target will be in FOV?)
 #Elevation SV value below 0 goes negative (no wraparound code), causes issue when halt telescope called (big swing to those coordinates)
+#DONE blank the screen for compute_targets so obvisou when done calculating
 
 #tool to align telescope images for stitching: https://astroalign.quatrope.org/en/latest/
 
@@ -145,9 +150,6 @@ def drop_outliers(input_list,num_stddevs=1):
 #mount calibration
 #goto given star, pick it out of an image, get error from predicted / actual based on deg/pixel in the image, repeat?
 #or implement feature tracking in images
-
-#make list of in-view satellites from location and list in/out view times for them as pre-processor to select targets
-#use class for targets with associated data?
 
 def initialize_config():
     config.end_program = False #reset globals for each run
@@ -271,8 +273,8 @@ def compute_target_coords(target_list = [['sun','astronomy'], ['moon','astronomy
     
     
     #quick printout for checking
-    for x in tracks:
-        print(  x.time.strftime("%Y-%m-%d %H:%M:%S")  + ' ' + str(x.az) + ' ' + str(x.el)  + ' ' + x.target_name)
+    # for x in tracks:
+    #     print(  x.time.strftime("%Y-%m-%d %H:%M:%S")  + ' ' + str(x.az) + ' ' + str(x.el)  + ' ' + x.target_name)
     
     
     #check for sun angle inclusion
@@ -317,7 +319,7 @@ def compute_target_coords(target_list = [['sun','astronomy'], ['moon','astronomy
         if len(track)>1:
             first_coord = track[0]
             for idx, coord in enumerate(track[1:]):
-                print(coord)
+                #print(coord)
                 delta_time = (coord.time-first_coord.time).total_seconds() #time between coords in seconds
                 track[idx] = track[idx]._replace(az_vel = abs((coord.az  - first_coord.az)/delta_time)) #deg/sec
                 track[idx] = track[idx]._replace(el_vel = abs((coord.el  - first_coord.el)/delta_time)) #deg/sec
@@ -380,10 +382,12 @@ async def run_app_GUI(root, nursery):
     '''This method, which runs Kivy, is run by trio as one of the coroutines.
     '''
     # trio needs to be set so that it'll be used for the event loop
-    await async_runTouchApp(root, async_lib='trio')  # run Kivy, asynch_runTouchApp is kivy function
-    print('App done')
-    # now cancel all the other tasks that may be running
-    nursery.cancel_scope.cancel()
+    try:
+        await async_runTouchApp(root, async_lib='trio')  # run Kivy, asynch_runTouchApp is kivy function
+    finally:
+        print('App done')
+        # now cancel all the other tasks that may be running
+        nursery.cancel_scope.cancel()
 
 
 
@@ -402,10 +406,8 @@ async def run_telescope(root):
     #the coordinates and targets are stored in root.time_of_individual_tracks, root.name_of_individual_tracks, root.individual_tracks 
 
     try:
-        x = 0
-
-        while True:
-            await trio.sleep(0) #checkpoint without blocking (e.g. GUI can operate now)
+        while keep_running_app:
+            await trio.sleep(0.01) #checkpoint without blocking (e.g. GUI can operate now)
 
  #           root.console.text += 'Sitting on the beach'
 
@@ -413,12 +415,7 @@ async def run_telescope(root):
  #           root.console.text += config.x #this one gets slow fast
 
            # await trio.sleep(2)
-            if x<100000:
-                x = x+1
-                # print(x)
-                # print(config.x)
-            else:
-                x = 0
+
             root.iPhone_stats.text = 'El vel' +str(config.el_speed)
             root.roboclaw_stats.text = 'Az vel' + str(config.az_speed)
             
@@ -432,6 +429,9 @@ async def run_telescope(root):
             root.state_label.text = 'config.state = ' + config.state
             if config.state == 'idle':
                 #update our stats
+                root.current_target_stats.text='Current target: None'
+                seq_num = 0
+                coordinate_loc = 0
                 stats, rc, address = telescope_control(rc, address = 0x80, cmd='noop', coord=[datetime.now(timezone.utc), config.az_angle_SV, config.el_angle_SV]) #update the PVs (done every telescope_control before command)
                 #note: can't use the textbox values because if they are deleted they will be invalid when this command gets fired off in the background
                 continue
@@ -483,16 +483,16 @@ async def run_telescope(root):
                         else:
                             print('Ran out of tracks, moving to idle state')
                             root.current_target_stats.text='Current target: None'
-                            seq_num = 0
-                            coordinate_loc = 0
+                            # seq_num = 0
+                            # coordinate_loc = 0
                             config.state = 'idle'
                             do_once = True
                             continue
                     else:
                         config.state = 'idle'
                         do_once = True
-                        seq_num = 0
-                        coordinate_loc = 0
+                        # seq_num = 0
+                        # coordinate_loc = 0
                         root.current_target_stats.text='Current target: None'
 
                         continue
@@ -546,6 +546,7 @@ async def run_telescope(root):
 
     except trio.Cancelled as e:
         print('Wasting time was canceled', e)
+        raise
     finally:
         # when canceled, print that it finished
         print('Done wasting time')
@@ -585,11 +586,10 @@ class FloatInput(TextInput): #text input that only accepts numbers
 
 class MainScreen(GridLayout):
 
-    
-
-
-    def __init__(self, **kwargs):
+    def __init__(self, nursery = None, **kwargs):
         super(MainScreen, self).__init__(**kwargs)
+        self.nursery = nursery #used to close window = stop code
+        
         self.cols = 3
         self.username = TextInput(multiline=False)
 
@@ -767,10 +767,32 @@ class MainScreen(GridLayout):
             
         self.dropdown.bind(on_select=dropdown_callback)
 
+        def enable_buttons(disable = True): #turns buttons on/off for tasks that take a long time e.g. compute targets     
+            self.manual_Az.disabled = disable
+            self.manual_El.disabled = disable
+            self.manual_AzEl.disabled = disable
+     
+            self.plus_Az_button.disabled = disable
+            self.plus_El_button.disabled = disable
+            self.checkbox_grid_layout.disabled = disable# automanual_checkbox
+     
+            self.minus_Az_button.disabled = disable
+            self.minus_El_button.disabled = disable
+     
+     
+            self.target_list_textinput.disabled = disable
+            self.compute_targets.disabled = disable
+            self.select_target.disabled = disable
+            
+            
+            self.home.disabled = disable
+            self.engage_track.disabled = disable
+            self.halt_telescope.disabled = disable
 
-
-        def compute_targets_callback(instance):
+        def compute_targets():
             print('computing target coordinates')
+            self.console.text = 'computing target coordinates'
+
             target_list_str = self.target_list_textinput.text
             print(target_list_str)
             
@@ -806,11 +828,11 @@ class MainScreen(GridLayout):
                 
             self.tracks_display.text = s
                         
-
-
             #create a dropdown with 10 buttons
             print('len of target pairs')
             print(len(target_pairs))
+            self.console.text = self.console.text + '\ncomputing target coordinates' + '\n' + str(len(target_pairs)) + '\n' + 'Done computing targets'
+
             self.dropdown.clear_widgets() #remove the old target widgets from the dropdown
 
             #create a dropdown with 10 buttons
@@ -829,8 +851,16 @@ class MainScreen(GridLayout):
                 # then add the button inside the dropdown
                 self.dropdown.add_widget(target)
 
+            enable_buttons(disable = False) #re-enable buttons after this is done running
 
-                
+                   #Clock.schedule_once(enable_buttons(disable = True), -1)
+                   #Clock.schedule_once(lambda dt: enable_buttons(disable=True), -1)         
+            
+        def compute_targets_callback(instance):
+            #have to do it this way because UI updates don't occur until the end of hte callback
+            enable_buttons(disable = True) #disable buttons while this is running
+            Clock.schedule_once(lambda dt: compute_targets(), 0)         
+
             
         self.compute_targets = Button(text='Compute target coords', size_hint_y = None)
         self.compute_targets.bind(on_press=compute_targets_callback)
@@ -875,7 +905,7 @@ class MainScreen(GridLayout):
             filename = datetime.now().strftime("%Y-%m-%d %H_%M_%S.%f")+".txt"
             folder = '/Users/andrewmiller/telescope/logs'
             with open(os.path.join(folder, filename), "w") as text_file:
-                header = ('datetime,az_SV,el_SV,az_dest_counts,el_dest_counts,az_speed_SV,el_speed_SV,az_speed_SV_counts,el_speed_SV_counts,config.az_pointing_error,config.el_pointing_error,lookahead' + '\n')
+                header = ('datetime,az_SV_input,el_SV_input,az_SV,el_SV,az_PV,el_PV,az_dest_counts,el_dest_counts,az_speed_SV,el_speed_SV,az_speed_SV_counts,el_speed_SV_counts,config.az_pointing_error,config.el_pointing_error,lookahead' + '\n')
                 text_file.write(header)
                 text_file.write(config.log)
             print('Done writing log')
@@ -885,8 +915,10 @@ class MainScreen(GridLayout):
 
         def ok_button(instance):
             print('ok pressed')
+            enable_buttons(disable = True)
         def cancel_button(instance):
             print('cancel pressed')
+            enable_buttons(disable = False)
         self.ok_cancel_grid_layout = GridLayout(rows = 2, height = self.console.height)
         self.ok = Button(text='OK', size_hint_y= None) #this is the main button for the dropdown (which contains other buttons and is hidden)
         self.ok.bind(on_release=ok_button)
@@ -977,6 +1009,12 @@ class MainScreen(GridLayout):
         self.add_widget(self.engage_track)
         self.add_widget(self.halt_telescope)
 
+        Window.bind(on_request_close=lambda *args: nursery.cancel_scope.cancel())
+        
+    def on_window_close(self, *args):
+        if self.nursery:
+            self.nursery.cancel_scope.cancel() #closes code running in nursery
+        return False
 
 #sun astronomy moon astronomy m43 astronomy venus astronomy
 
@@ -996,9 +1034,11 @@ class MainScreen(GridLayout):
 if __name__ == '__main__':
     async def root_func():
         '''trio needs to run a function, so this is it. '''
+        #root = MainScreen()    #Builder.load_string(kv)  # root widget
 
-        root = MainScreen()    #Builder.load_string(kv)  # root widget
         async with trio.open_nursery() as nursery:
+            root = MainScreen(nursery = nursery)    #Builder.load_string(kv)  # root widget
+
             '''In trio you create a nursery, in which you schedule async
             functions to be run by the nursery simultaneously as tasks.
 
@@ -1007,7 +1047,9 @@ if __name__ == '__main__':
             at the `with` level. '''
             nursery.start_soon(run_app_GUI, root, nursery)
             nursery.start_soon(run_telescope, root)
-        App.stop
+        app = App.get_running_app()
+        if app:
+            app.stop()
         #root.close()
     trio.run(root_func)
 
@@ -1035,4 +1077,8 @@ if __name__ == '__main__':
 # print('consumer_image_save join() complete')
 # consumer_camera.join()
 # print('consumer_camera join() complete')
+keep_running_app = False
 print('All threads finished')
+#import time
+#time.sleep(5)
+#os._exit(0) #there is a bug in running kivy from spyder that keeps the window hung open forever when clicking it closed: https://github.com/spyder-ide/spyder/issues/19057

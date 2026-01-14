@@ -114,7 +114,7 @@ def astronomy(my_locs, target_name = 'moon', timespacing = timedelta(seconds=1),
         az = (targetaltaz.az.deg + compass_dir + mag_declination.d ) % 360
         el = targetaltaz.alt.deg
         
-        print('az: ' + str(az) + ' ' + 'el: ' + str(el))
+        #print('az: ' + str(az) + ' ' + 'el: ' + str(el))
         x = x + 1
         target_time_az_el_list.append([target_name, telescope_time, az, el, 0, 0]) #trailing zeros are the placeholder velocities, computed outside of this function
         
@@ -247,6 +247,7 @@ def satellite_tracking(my_locs, target_name = 'ISS', timespacing = timedelta(sec
             lines = [line.rstrip() for line in file]
             client = lines[0]
             password = lines[1]
+            print('connecting with ' + client + ' ' + password)
         st = SpaceTrackClient(client,password)
         print('Spacetrack TLE: ')
         #print(st.gp(norad_cat_id=[25544, 41335], format='tle')) #can get more than one TLE but not doing that here
@@ -451,8 +452,8 @@ def satellite_tracking(my_locs, target_name = 'ISS', timespacing = timedelta(sec
         aa = get_az_el(Time(t)) #get the coordinates        
 
         target_time_az_el_list.append([target_name_original, t, aa.az.deg, aa.alt.deg, 0, 0]) #the trailing 0 s are velocity placeholders, to be computed outside of this function
-        print([target_name_original, t, aa.az.deg, aa.alt.deg])
-        timespacing = timedelta(seconds=0.1)
+        #print([target_name_original, t, aa.az.deg, aa.alt.deg])
+        timespacing = timedelta(seconds=0.1) #this sets the time between outputted coordinates (drives computation time, at somepoint is roboclaw bandwidth limiting)
         t = t + timespacing
         #timespacing might need to be dynamic, adjust until the minimum spacing between angles is the encoder resolution minimum angle or some small enough value
         #might also need to try to give it the next coodinate before it reaches the correct one or something to let it keep rolling smoothly
