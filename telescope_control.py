@@ -22,6 +22,9 @@ def normalize_360(angle): #compute difference in angles with wraparound
 #def telescope_control(rc = '', cmd = 'noop', coord = [time_of_coords, az_SV, el_SV]): #arg names for reference
 def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.now(timezone.utc), 0.0, 0.0, 0.0, 0.0], lookahead = False):
 
+    robo_connected = False #use for debugging when roboclaw not connected
+    
+
     az_speed_max = 12 #deg/sec
     el_speed_max = 12 #deg/sec    
 
@@ -36,8 +39,10 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
     el_SV_input = el_SV
     az_speed_SV = coord[3] #deg/sec the speed that it should be moving (so it tracks and doesn't just speed away to the target coordinate faster than the target is moving)
     el_speed_SV = coord[4] #deg/sec
-    
-    robo_connected = False #use for debugging when roboclaw not connected
+
+    config.az_angle_SV = az_SV#store for use elsewhere
+    config.el_angle_SV = el_SV
+
 
     #time_of_coords not actually used here but useful for debugging
     stats = '' #was planning on returning stats but putting them in config. instead
@@ -62,7 +67,7 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
     az_speed_SV_counts = 0 #initialize
     el_speed_SV_counts = 0
     
-    deadband_counts = 10
+    deadband_counts = 50
     az_backlash = 0 #needs measurement
     el_backlash = 0 #needs measurement
     az_accel = 1000000 #counts/sec^2
@@ -264,7 +269,179 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
     ##############testing
         print('roboclaw init complete')
         return stats, rc, address
+        if not robo_connected:
+            config.Bit1_az = 0 #testing only
+            config.Bit1_el = 0 #testing only
+            config.az_encoder_value = 0 #counts, replace with read function
+            config.el_encoder_value = 0 #counts, replace with read function
+            
+        if robo_connected:
+    
+            restore_defaults = True
+            reconnect = True
+            while reconnect:
+                print('Opening roboclaw USB com port')
+                #Windows comport name
+                #rc = Roboclaw("COM4",38400)
+                #Linux comport name
+                #rc = Roboclaw("/dev/tty.usbmodem1101",38400)
+                #rc = Roboclaw("/dev/tty.usbmodem212301",38400)
+                rc = Roboclaw("/dev/tty.usbmodem111201", 38400)
 
+                roboclaw_success = rc.Open()
+    
+                address = 0x80 #decimal 128
+            
+                version = rc.ReadVersion(address)
+                print(version)
+                if not roboclaw_success or not version[0]:
+                    print('Error opening roboclaw')
+                   # return
+                    
+                #initialize
+                if restore_defaults:
+                    rc.RestoreDefaults(address) #need to re-establish serial connection once using this
+                    restore_defaults = False
+                else:
+                    reconnect = False
+    
+    #this error means it's not plugged in to the USB: AttributeError: 'Roboclaw' object has no attribute '_port'
+    #the bus power to the roboclaw needs to be supplied after USB is plugged in, otherwise won't run
+            # # set M1 & M2 enc (to 2**32 = 4294967295 max range, but is signed))
+            print('Setting encoder to 0')
+            #rc.SetEncM1(address,int(2**32/2)) #Not sure how/if Roboclaw handles encoder wraparound. Might need to reset encoder value as it nears either side evenutally
+            #rc.SetEncM2(address,int(2**32/2))
+            rc.SetEncM1(address,0) #Not sure how/if Roboclaw handles encoder wraparound. Might need to reset encoder value as it nears either side evenutally
+            rc.SetEncM2(address,0)
+            
+            print('Setting encoder directions')
+            rc.SetM1EncoderMode(address, int('00100000', 2)) #reverse motor relative direction direction int('00100000', 2))
+            rc.SetM2EncoderMode(address, int('00000000', 2)) #may need to adjust depending on how final wiring goes (so positive encoder and positive angle match)
+            
+            # # set M1&M2 max amps #stall current 5600mA, 10mA units for current limit
+            print('Setting max current')
+            rc.SetM1MaxCurrent(address,5000) # Current value is in 10ma units. To calculate multiply current limit by 10.
+            rc.SetM2MaxCurrent(address,5000)
+            
+            #voltage limit setting in python doesn't seem to work
+            #rc.SetMainVoltages(address, 130, 110) #100mV increments
+            #rc.SetMaxVoltageMainBattery(address, 66) #volts * 5.12 #this doesn't work in python but does work on their motion application
+            #rc.SetMinVoltageMainBattery(address, 25) #(volts-6)*5=val
+            
+            #configure limit switches
+            #S3 0x01 = E-stop
+            #S4,S5:
+            #home(user) = 0x62
+            #home(auto) = 0xE2
+            #Home(Auto)/Limit(Fwd) = 0xF2
+            #Home(User)/Limit(Fwd) = 0x72
+            #Limit(Rev) = 0x22
+            #Limit(Fwd) = 0x12
+            #Limit(Both) = 0x32
+            print('read pin functions')
+            rc.ReadPinFunctions(address)
+            print('set pin functions')
+            rc.SetPinFunctions(address, 0x01, 0x72, 0x72) #S3 is e-stop, home only for az, home and limits for el
+    
+            print('Set velocity PID to 0')
+            rc.SetM1VelocityPID(address, 0x00000000, 0x00000000, 0x00000000, 256875) #QPPS set by measuring motor velocity open loop, PID here defaults
+            rc.SetM2VelocityPID(address, 0x00000000, 0x00000000, 0x00000000, 256875) #QPPS set by measuring motor velocity open loop, PID here defaults
+            #have to set the velocity PID terms to zero or it enables a cascaded PIV-D loop. Roboclaw defaults to having some terms in the velocity loop
+    #open loop speed seems to max out at 30000 but has significant variability there - down to 20k, averaging maybe 25k
+    #QPPS from PIV autotune = 102187
+    
+    #these probably need to be re-evaluated after the drives have been run in a bit
+    
+            # # get M1POS PID [D(4 bytes), P(4 bytes), I(4 bytes), MaxI(4 bytes),Deadzone(4 bytes), MinPos(4 bytes), MaxPos(4 bytes)]
+            print('Read position PID')
+            rc.ReadM1PositionPID(address)
+            # # set M1POS PID
+            P = 39 #starting values from autotune in motion studio, for harmonic drives by their lonesome
+            I = 2
+            D = 540
+            deadzone = 4
+            max_I = 2617
+            min_pos = -1073741824 #this is the minimum encoder position (doesn't roll over here, just stops)
+            max_pos = 1073741824
+            print('Set position PID')
+            rc.SetM1PositionPID(address, P, I, D, max_I, deadzone, min_pos, max_pos)
+            
+            # # get M2POS PID
+            print('Read position PID')
+            print(rc.ReadM2PositionPID(address))
+            # # set M2POS PID
+            P = 39 #starting values from autotune in motion studio, for harmonic drives by their lonesome
+            I = 2
+            D = 540
+            deadzone = 0
+            max_I = 2617
+            min_pos = -1073741824 #negative values here seem to cause undefined behavior (though not in motion studio? Or maybe only if out of range?)
+            max_pos = 1073741824
+            print('Set position PID')
+            rc.SetM2PositionPID(address, P, I, D, max_I, deadzone, min_pos, max_pos)
+            
+            # stats = 'this is the roboclaw stats pull'
+            print('Read errors in roboclaw registers')
+            status = rc.ReadError(address)[0]
+            status_list = [{'Normal' : status & 0x000000},
+            {'E_Stop' : status & 0x000001}, #this always seems to be set?
+            {'Temperature_Error' : status & 0x000002},
+            {'Temperature_2_Error' : status & 0x000004},
+            {'Main_Voltage_High_Error' : status & 0x000008},
+            {'Logic_Voltage_High_Error' : status & 0x000010},
+            {'Logic_Voltage_Low_Error' : status & 0x000020},
+            {'M1_Driver_Fault_Error' : status & 0x000040},
+            {'M2_Driver_Fault_Error' : status & 0x000080},
+            {'M1_Speed_Error' : status & 0x000100},
+            {'M2_Speed_Error' : status & 0x000200},
+            {'M1_Position_Error' : status & 0x000400},
+            {'M2_Position_Error' : status & 0x000800},
+            {'M1_Current_Error' : status & 0x001000},
+            {'M2_Current_Error' : status & 0x002000},
+            {'M1_Over_Current_Warning' : status & 0x010000},
+            {'M2_Over_Current_Warning' : status & 0x020000},
+            {'Main_Voltage_High_Warning' : status & 0x040000},
+            {'Main_Voltage_Low_Warning' : status & 0x080000},
+            {'Temperature_Warning' : status & 0x100000},
+            {'Temperature_2_Warning' : status & 0x200000},
+            {'S4_Signal_Triggered' : status & 0x400000},
+            {'S5_Signal_Triggered' : status & 0x800000},
+            {'Speed_Error_Limit_Warning' : status & 0x01000000},
+            {'Position_Error_Limit_Warning' : status & 0x02000000}]
+            [print(stat) for stat in status_list if list(stat.values())[0] != 0]
+            config.error_conds = status_list #store for display in the GUI
+    #############testing
+    
+            # # rc.ReadEncoderModes(address)
+            # # rc.DutyM1(address, 0)
+            # # rc.DutyM2(address, 0)
+            # # rc.DutyM1(address, 10000)
+            # # rc.DutyM2(address, 10000)
+            # # rc.SpeedAccelDeccelPositionM1(address, 100, 1000, 100, -20000, 1) #(address, accel, speed, deccel, position, buffer) #need to play with accel/decel in final system for smooth motion
+            #  #rc.SpeedAccelDeccelPositionM2(address, 100, 1000, 100, 40000, 1) #(address, accel, speed, deccel, position, buffer)
+            # el_dest_counts = 0
+            # el_speed_SV = 100
+            # buffer = 1
+            # rc.SpeedAccelDeccelPositionM2(address, el_accel, el_speed_SV, el_deccel, el_dest_counts, buffer)
+            # rc.GetDeadBand(address)
+            # rc.GetConfig(address)
+            # rc.ReadBuffers(address)
+            # rc.ReadM2PositionPID(address)
+            # rc.ReadM2VelocityPID(address)
+            # rc.ReadPWMMode(address)
+            
+            # while True:
+            #     az_encoder_value = rc.ReadEncM1(address) #Receive: [Enc1(4 bytes), Status, CRC(2 bytes)]
+            #     Bit1_az = is_set(az_encoder_value[1], 1)
+            #     az_encoder_value = az_encoder_value[1]
+            #     el_encoder_value = rc.ReadEncM2(address)
+            #     Bit1_el = is_set(el_encoder_value[1], 1)
+            #     el_encoder_value = el_encoder_value[1]
+            #     print(str(az_encoder_value) + ' ' + str(el_encoder_value))
+    
+    ##############testing
+        print('roboclaw init complete')
+        return stats, rc, address
 
     #queue commands
 #        telescope_q = queues['telescope_q']
@@ -275,7 +452,7 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
     ###### Begin status updates
     #for all other commands, first get the current position of the encoders
 
-    if robo_connected:
+    if robo_connected: #get current condition from controller
         #read state
         az_encoder_value = rc.ReadEncM1(address) #Receive: [Enc1(4 bytes), Status, CRC(2 bytes)]
         config.Bit1_az = is_set(az_encoder_value[1], 1)
@@ -286,6 +463,9 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
         config.Bit1_el = is_set(el_encoder_value[1], 1)
         el_encoder_value = el_encoder_value[1]
         #print('el encoder is ' + str(el_encoder_value))
+        
+        config.az_encoder_value = az_encoder_value
+        config.el_encoder_value = el_encoder_value
 
         az_speed_PV = rc.ReadSpeedM1(address)[1] #status bit here also can tell speed (duplicate of ReadEncM1/2)
         el_speed_PV = rc.ReadSpeedM2(address)[1]
@@ -305,6 +485,7 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
     else: #not connected so just read last position recorded
         az_encoder_value = config.az_encoder_value
         el_encoder_value = config.el_encoder_value 
+
     
     output_str = ''
     #read status
@@ -321,9 +502,6 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
     if old_el_dir == 0:
         old_el_dir == -1 #used for backlash
     
-    config.az_encoder_value = az_encoder_value
-    config.el_encoder_value = el_encoder_value
-
     config.az_angle_PV = (360*az_encoder_value/az_counts_per_rev)%360 #update global angle value
     config.el_angle_PV = (360*el_encoder_value/el_counts_per_rev)%360 #update global angle value
     
@@ -346,7 +524,7 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
     config.el_pointing_error, el_pointing_error_dir = get_angular_distance(el_SV, config.el_angle_PV)
     config.total_pointing_error =  ((config.az_pointing_error)**2 + (config.el_pointing_error**2)) ** 0.5
 
-    
+
     # if len(config.coordinates) > 0:
     #     print('Reading ' + str(len(config.coordinates)) + ' coordinates')
 
@@ -425,6 +603,7 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
         el_speed_SV = el_speed_SV_placeholder
         
 ##### new code for wraparound
+        print('before shortest SV ' + str(az_SV) + ' config.az_angle_PV ' + str(config.az_angle_PV) + ' counts per rev ' + str(az_counts_per_rev) + ' az encoder ' + str(az_encoder_value))
         def shortest_around_circle(SV, PV, counts_per_rev, counts_PV):         # #determine right direction to move from current position (don't take long path around circle)    
             #print('angle PV ' +str(PV) +' angle SV ' + str(SV))
             positive_turn_distance = normalize_360(SV-PV)
@@ -442,7 +621,7 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
             return (SV, new_dir)
         
         az_dest_counts, new_az_dir = shortest_around_circle(az_SV, config.az_angle_PV, az_counts_per_rev, az_encoder_value)  #this will always be 0-360 degrees from the trajectory planner
-        #print('az_dest_counts ' + str(az_dest_counts) + ' az_encoder_value ' + str(az_encoder_value) + ' delta ' + str(az_dest_counts - az_encoder_value) + ' az_SV ' + str(az_SV) + ' az_PV ' + str(config.az_angle_PV) +  '  az_speed_SV' + str(az_speed_SV))
+        print('az_dest_counts ' + str(az_dest_counts) + ' az_encoder_value ' + str(az_encoder_value) + ' delta ' + str(az_dest_counts - az_encoder_value) + ' az_SV ' + str(az_SV) + ' az_PV ' + str(config.az_angle_PV) +  '  az_speed_SV' + str(az_speed_SV))
         # #testing
         # for i in range(360):
         #     az_SV = i
@@ -462,7 +641,6 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
 
         # #don't forget about cable wrap limits!!
 
-            
         #el can't wrap around so not an issue for it
         if el_dest_counts > el_encoder_value:
             new_el_dir = 1
@@ -573,91 +751,72 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
 
     try:
         #send the new command destinations
-        
+
+        az_speed_SV_counts = round(az_speed_SV_counts)
+        el_speed_SV_counts = round(el_speed_SV_counts)
+        az_dest_counts = round(az_dest_counts) #processes as a float but controller only does ints
+        el_dest_counts = round(el_dest_counts)
+
+        try:
+            #check if we are where we are supposed to be close enough
+            #print('az_dest_counts ' + str(az_dest_counts) + ' az_encoder_value ' + str(az_encoder_value) + ' el_dest_counts ' + str(el_dest_counts) + ' el_encoder_value ' + str(el_encoder_value))
+
+            if abs(az_dest_counts - az_encoder_value) <= deadband_counts:
+                config.az_in_position = True
+            else:
+                config.az_in_position = False
+            if abs(el_dest_counts - el_encoder_value) <= deadband_counts:
+                config.el_in_position = True
+            else:
+                config.el_in_position = False
+        except Exception as e:
+            print('No destination found for telescope control to slew to!')
+            print(e)
+            
         if robo_connected:
             #The Buffer argument can be set to a 1 or 0. If a value of 0 is used the command will be buffered
             #and executed in the order sent. If a value of 1 is used the current running command is stopped,
             #any other commands in the buffer are deleted and the new command is executed
             buffer = 1
-            #print('az_accel' + str(az_accel))
-            #print('az_speed' + str(az_speed_SV))
-            #print('az_deccel' + str(az_deccel))
-            az_speed_SV_counts = round(az_speed_SV_counts)
-            el_speed_SV_counts = round(el_speed_SV_counts)
-            #print('az_dest_counts' + str(az_dest_counts))
-            az_dest_counts = round(az_dest_counts) #processes as a float but controller only does ints
-            #print('az_dest_counts' + str(az_dest_counts))
-            el_dest_counts = round(el_dest_counts)
 
-            try:
-                #check if we are where we are supposed to be close enough
-                if abs(az_dest_counts - az_encoder_value) < 360*deadband_counts/az_counts_per_rev:
-                    config.az_in_position = True
-                else:
-                    config.az_in_position = False
-                if abs(el_dest_counts - el_encoder_value) < 360*deadband_counts/el_counts_per_rev:
-                    config.el_in_position = True
-                else:
-                    config.el_in_position = False
-            except Exception as e:
-                print('No destination found for telescope control to slew to!')
-                print(e)
-                
-            #if distance > some constant, slew fast
-            #then
-            #get current point and new point timestamps and distances
-            #set speed to match
-            #drive to new point
-            #remove old point from list
-            #repeat
             if cmd == 'move_az_el': #keep log file size reasonable
                 config.log = (config.log + str(datetime.now(timezone.utc)) + ',' + str(az_SV_input) + ',' + str(el_SV_input) + ',' + str(az_SV) + ',' + str(el_SV) + ',' +  str(config.az_angle_PV) + ',' + str(config.el_angle_PV) + ',' + str(az_dest_counts) + ',' + str(el_dest_counts) + ',' + str(az_speed_SV) + ',' + str(el_speed_SV) + ',' + str(az_speed_SV_counts) + ',' + str(el_speed_SV_counts) + ','
                          + str(config.az_pointing_error) + ',' + str(config.el_pointing_error) + ',' + str(lookahead) + '\n')
 
 
-            if cmd == 'home_motors' or cmd == 'move_az_el' or cmd == 'hold':
+            if cmd == 'home_motors' or cmd == 'move_az_el' or cmd == 'hold': 
                 
-                # if az_dest_counts < 0:
-                #     az_dest_counts = az_dest_counts + 2**32 #controller encoder is an unsigned int32
-                # # el_dest_counts = el_dest_counts + 2**32
-                
-                # rc.SetEncM1(address,int(2**32/8)) #Not sure how/if Roboclaw handles encoder wraparound. Might need to reset encoder value as it nears either side evenutally
-                # rc.SetEncM1(address,int(0)) #Not sure how/if Roboclaw handles encoder wraparound. Might need to reset encoder value as it nears either side evenutally
-                # val = 2000000
-                # rc.SetEncM1(address,int(val)) #Not sure how/if Roboclaw handles encoder wraparound. Might need to reset encoder value as it nears either side evenutally
-
-                
-                # az_encoder_value = rc.ReadEncM1(address) #Receive: [Enc1(4 bytes), Status, CRC(2 bytes)]
-                # config.Bit1_az = is_set(az_encoder_value[1], 1)
-                # az_encoder_value = az_encoder_value[1]
-                # print(az_encoder_value)
-        
                 rc.SpeedAccelDeccelPositionM1(address, az_accel, az_speed_SV_counts, az_deccel, az_dest_counts, buffer) #(address, accel, speed, deccel, position, buffer)
                 rc.SpeedAccelDeccelPositionM2(address, el_accel, el_speed_SV_counts, el_deccel, el_dest_counts, buffer)
         else:
+            az_encoder_value = config.az_encoder_value
+            el_encoder_value = config.el_encoder_value
+
             #testing start (virtual controller)
-            if az_dest_counts > az_encoder_value:
-                az_encoder_value = az_encoder_value + 500
+            if az_dest_counts > az_encoder_value: #this doesn't 
+                az_encoder_value = az_encoder_value + 10
                 config.Bit1_az = 0
             elif az_dest_counts < az_encoder_value:
-                az_encoder_value = az_encoder_value - 500
+                az_encoder_value = az_encoder_value - 10
                 config.Bit1_az = 1
-
             else:
                 #print('Az already in location')
                 pass
             #print('#####before el_encoder_value: ' + str(el_encoder_value) + ' el_dest_counts: ' + str(el_dest_counts) + 'config.el_angle_PV: ' + str(config.el_angle_PV))
                 
             if el_dest_counts > el_encoder_value:
-                el_encoder_value = el_encoder_value + 500
+                el_encoder_value = el_encoder_value + 10
                 config.Bit1_el = 0
             elif el_dest_counts < el_encoder_value:
-                el_encoder_value = el_encoder_value - 500
+                el_encoder_value = el_encoder_value - 10
                 config.Bit1_el = 1
             else:
                 #print('El already in location')
                 pass
             #print('#####after el_encoder_value: ' + str(el_encoder_value) + ' el_dest_counts: ' + str(el_dest_counts) + 'config.el_angle_PV: ' + str(config.el_angle_PV))
+
+            #import time
+            #time.sleep(0.001)
 
             config.az_encoder_value = az_encoder_value
             config.el_encoder_value = el_encoder_value

@@ -6,6 +6,7 @@ Created on Tue Jun 10 10:28:56 2025
 """
 import astropy.units as u
 from astropy.time import Time
+from time import sleep
 from datetime import datetime, date, timezone, timedelta
 from astropy.coordinates import AltAz, EarthLocation, SkyCoord, get_body, get_sun
 from pygeomag import GeoMag
@@ -102,6 +103,11 @@ keep_running_app = True
 #Fine tune the pointing during tracking so it can converge on teh right value with the lookahead keeping velocity up (or just get close enough and proceed at constant velocity if the target will be in FOV?)
 #Elevation SV value below 0 goes negative (no wraparound code), causes issue when halt telescope called (big swing to those coordinates)
 #DONE blank the screen for compute_targets so obvisou when done calculating
+#add sun inclusion checking to the actual track checker
+#implement offline storage of all TLE for offline use if no internet
+#DONE - this is a bug in the fake roboclaw logic somewhere - manual negative command not wrapping around properly now? make sure not a bug in the non-Roboclaw connected code
+#investigate if driving to the first points at full speed until you get to near zero pointing error (it will be pulsey as it closes in) then engaging controlled speed as a binary works
+
 
 #tool to align telescope images for stitching: https://astroalign.quatrope.org/en/latest/
 
@@ -172,7 +178,7 @@ def initialize_config():
     config.az_angle_PV = 0 #degrees
     config.el_angle_PV = 0 #degrees
     config.az_in_position = False
-    config.el_in_potiion = False
+    config.el_in_position = False
     config.camera_ready = False
     config.az_encoder_value = 0 #counts
     config.el_encoder_value = 0 #counts
@@ -185,6 +191,10 @@ def initialize_config():
     config.el_speed = 0 #counts/sec
     config.az_current = 0 #current draw in 10 mA increments
     config.el_current = 0
+    
+    config.point_and_shoot_start = 0
+    config.point_and_shoot_end = 0
+    
 
     config.x = 0 #use for quit debugging
     config.log = '' #store text for looking at performance
@@ -336,8 +346,6 @@ def compute_target_coords(target_list = [['sun','astronomy'], ['moon','astronomy
     return time_of_individual_tracks, name_of_individual_tracks, individual_tracks
 #time_of_individual_tracks, name_of_individual_tracks, individual_tracks =  compute_target_coords(target_list = [['sun','astronomy'], ['moon','astronomy'], ['polaris','astronomy'], ['M42', 'astronomy'], ['ISS', 'satellite_tracking'] ])
 
-
-
 target_track = namedtuple('target_track', ['target_name', 'time', 'az', 'el', 'az_vel', 'el_vel']) #think through how this should be organized - basic lists, dicts, other?
 stats = namedtuple('stats', ['az_PV', 'el_PV', 'error_conds', ]) #think through how this should be organized - basic lists, dicts, other?
 
@@ -438,7 +446,8 @@ async def run_telescope(root):
             elif config.state == 'manual':
                 #send command for manual move
                 print('manual command issued')
-                
+                # config.az_angle_SV = float(root.manual_Az.text) #these don't get set anywhere else if a track isn't run first
+                # config.el_angle_SV = float(root.manual_El.text)
                 stats, rc, address = telescope_control(rc, address = 0x80, cmd='move_az_el', coord=[datetime.now(timezone.utc), float(root.manual_Az.text), float(root.manual_El.text)]) #initialize telescope controller
                 config.state = 'idle' #don't keep hammering the roboclaw with the same position
 
@@ -534,6 +543,58 @@ async def run_telescope(root):
             elif config.state == 'home':
                 print('Sending homing sequence')
                 #send the home command
+                
+            elif config.state == 'point_and_shoot':
+                #bug: will not be able to access coord if still movign when start is triggered
+                
+                if config.az_in_position and  config.el_in_position:   #move to coordinate (first time will be in position because it isn't slewing somewhere)
+                    sleep(1) #let any jitter settle
+                    #take photo
+                    if len(config.selected_target_coords)>0:    
+                        coord = config.selected_target_coords.pop(0)
+                        print('heading to ' + str(coord[1]) + ',' + str(coord[2]))
+                        stats, rc, address = telescope_control(rc, address=0x80,  cmd='move_az_el', coord = coord, lookahead = False) #tell telescope to stop where it is
+                    else:
+                        #remove first photo (taken at start arbitrary position)
+                        config.state = 'idle'
+                        print('Done with point and shoot')
+                else:
+                    try: #catch the first run where coord doesn't exist yet, but we want to not put in dummy starting points into the display
+                        stats, rc, address = telescope_control(rc, address=0x80, coord = coord, cmd='noop') #tell telescope to stop where it is
+                        #print('Az error: '+ str(config.az_pointing_error) + 'el error: ' + str(config.el_pointing_error))
+                        continue
+                    except:
+                        stats, rc, address = telescope_control(rc, address=0x80, coord = [datetime.now(timezone.utc), config.az_angle_PV, config.el_angle_PV], cmd='move_az_el') #stop the scope where it is
+                        print('probably no coordinate due to unsettled start')
+                        continue
+
+                    
+                
+                # for coord in config.selected_target_coords:
+                #     print('heading to coord az ' + str(coord[1]) + ' el ' + str(coord[2]))
+
+                #     stats, rc, address = telescope_control(rc, address=0x80,  cmd='move_az_el', coord = coord, lookahead = False) #tell telescope to stop where it is
+                #     if not config.az_in_position and not config.el_in_position:
+                #         stats, rc, address = telescope_control(rc, address=0x80,  cmd='noop', coord = coord, lookahead = False) #tell telescope to stop where it is
+                #         print('Az error: '+ str(config.az_pointing_error) + 'el error: ' + str(config.el_pointing_error))
+                #         continue
+                #     else :
+                #         print('settled')
+                #         sleep(1)#let any jitters settle
+                #         #take photo here
+                
+                # config.state = 'idle'
+                    
+                    
+                #time.sleep(1) # Sleep to let jitter settle
+                #add photo request to camera queue
+    #            queues['camera_q'].put('point_and_shoot_'+str(az)+'_'+str(el))
+    #            #wait until queue size is zero (photo taken) before moving on
+    #            while not config.camera_ready:
+    #                pass #wait for camera to finish
+                
+                    
+                
             else:
                 print('unknown state')
                 print(config.state)
@@ -763,9 +824,26 @@ class MainScreen(GridLayout):
                 output_str += str([str(x) for x in line]) + '\n'
             self.console.text = output_str #display all the coordinates as a string for reference
         
-        
-            
         self.dropdown.bind(on_select=dropdown_callback)
+
+        self.point_and_shoot = Button(text='Point and shoot')
+        def point_and_shoot_callback(instance):
+            config.selected_target_coords = point_and_shoot(config.my_locs, FOV = 1, slew_speed = 5) #units degrees, degrees/sec
+            config.state = 'point_and_shoot'
+        self.point_and_shoot.bind(on_release=point_and_shoot_callback)
+        
+        self.point_and_shoot_start = Button(text='PaS start')
+        def point_and_shoot_start_callback(instance):
+            config.point_and_shoot_start = [config.az_angle_PV , config.el_angle_PV]
+            self.console.text = 'Point and shoot start = ' + str(config.az_angle_PV) + ',' + str(config.el_angle_PV) +'\n'
+        self.point_and_shoot_start.bind(on_release=point_and_shoot_start_callback)
+        
+        self.point_and_shoot_end = Button(text='PaS end')
+        def point_and_shoot_end_callback(instance):
+            config.point_and_shoot_end = [config.az_angle_PV , config.el_angle_PV ]
+            self.console.text = self.console.text + 'Point and shoot end = ' + str(config.az_angle_PV) + ',' + str(config.el_angle_PV) + '\n'
+
+        self.point_and_shoot_end.bind(on_release=point_and_shoot_end_callback)
 
         def enable_buttons(disable = True): #turns buttons on/off for tasks that take a long time e.g. compute targets     
             self.manual_Az.disabled = disable
@@ -1008,6 +1086,11 @@ class MainScreen(GridLayout):
         self.add_widget(self.home)
         self.add_widget(self.engage_track)
         self.add_widget(self.halt_telescope)
+        
+        self.add_widget(self.point_and_shoot_start)
+        self.add_widget(self.point_and_shoot_end)
+        self.add_widget(self.point_and_shoot)
+        
 
         Window.bind(on_request_close=lambda *args: nursery.cancel_scope.cancel())
         

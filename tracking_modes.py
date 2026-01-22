@@ -11,6 +11,7 @@ from datetime import datetime, date, timezone, timedelta
 from pygeomag import GeoMag
 
 import time    
+import math
 
 from sgp4.api import Satrec
 from sgp4.api import SGP4_ERRORS
@@ -27,30 +28,61 @@ import os
         
 #point and shoot mode:
 #aim at [center or top left] and raster scan as described
-def point_and_shoot(my_loc, queues, FOV = 1, az_steps = 10, el_steps = 5): #units degrees
+def point_and_shoot(my_locs, FOV = 1, slew_speed = 5): #units degrees, degrees/sec
+
+    #in GUI, manually slew to start (top left) and end (bottom right) positions
+    #include FOV parameter (dependent on magnification and camera)
+    #compute the path coordinates
+    #go to point, halt, camera, proceed
+    #include repeat photos?
+
 
     config.tracking_ready = True # signal that the tracker is now producing tracking coordinates
-
     
     print('Starting point and shoot thread')
 
     #compute steps as degrees to send
+    az_start = config.point_and_shoot_start[0]
+    az_end = config.point_and_shoot_end[0]
+    el_start = config.point_and_shoot_start[1]
+    el_end = config.point_and_shoot_end[1]
+    
+    if az_start == az_end and el_start == el_end:
+        #return a single coordinate for a single photo there
+        target_time_az_el_list=[[datetime.now(timezone.utc), az_start, el_start, slew_speed, slew_speed]] #the trailing 0 s are velocity placeholders, to be computed outside of this function
+        return target_time_az_el_list
+    
+    az_dist = az_end-az_start #need to implement 360 rollover check
+    el_dist = el_end-el_start
+    
+    az_step_num = math.ceil(az_dist/(FOV)) #how many steps to take
+    el_step_num = math.ceil(el_dist/(FOV))
+    az_step_size = az_dist/az_step_num
+    el_step_size = el_dist/el_step_num
+    
+    az_coords = [az_start + x*az_step_size for x in range(az_step_num+1)] #+1 because we want photos at the endpoints on both sides
+    el_coords = [el_start + x*el_step_size for x in range(el_step_num+1)]
 
-    for el in range (0,el_steps): #ADD: need to relate steps to FOV for decent coverage with overlaps for stitching
-        for az in range(0,az_steps):
-            send_commands(my_loc, az, el, queues['telescope_q'])
-            
-            while not config.az_in_position and not config.el_in_position:
-                pass #wait until both axes in position
-                
-            time.sleep(1) # Sleep to let jitter settle
-            #add photo request to camera queue
-            queues['camera_q'].put('point_and_shoot_'+str(az)+'_'+str(el))
-            #wait until queue size is zero (photo taken) before moving on
-            while not config.camera_ready:
-                pass #wait for camera to finish
-            
-    print('Completed point and shoot thread')
+    target_time_az_el_list = []
+
+    #include something if missing either az or el steps (divide by zero) if choosing only a single row/column of view coordinates
+    x = 0
+    y = 0
+    for el in el_coords: #ADD: need to relate steps to FOV for decent coverage with overlaps for stitching
+        for az in az_coords:            
+            print('Computed coord ['+ str(x) +','+ str(y) + '] at ' + str(az) + ','+ str(el))
+            t = datetime.now(timezone.utc) + timedelta(seconds=2) #1 second to move, 1 to settle (in the execution code)? Or just ignore the timestamp in the execution code?
+            target_time_az_el_list.append([t, az, el, slew_speed, slew_speed]) #the trailing 0 s are velocity placeholders, to be computed outside of this function
+            x = x + 1
+        y = y + 1
+        x = 0
+
+    print('Completed point and shoot coordinate computations for ' + str(len(az_coords) * len(el_coords)) + ' locations')
+    print('start ' + str(az_start) + ',' + str(el_start) + ' end ' + str(az_end) + ',' + str(el_end) + ' in steps of ' + str(az_step_size) + ',' + str(el_step_size))
+    target_time_az_el_list = list(reversed(target_time_az_el_list)) #reverse the coordinates so we start taking pictures at the endpoint rather than drive back to the start, wasting time
+
+    return target_time_az_el_list
+
     
 #include way to scan by start/end lat/long coordinates
 
@@ -238,7 +270,7 @@ def satellite_tracking(my_locs, target_name = 'ISS', timespacing = timedelta(sec
         return location.geodetic
 
 
-    # from spacetrack import SpaceTrackClient #this pulls the TLE from a satellite database
+    # from spacetrack import SpaceTrackClient #this pulls the TLE from a satellite database (could pre-download for offline use but ephemeris will become out of date)
     try:
         print('Connecting to Spacetrack')
         folder = '/Users/andrewmiller/telescope/'
