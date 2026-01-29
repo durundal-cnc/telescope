@@ -5,3 +5,10 @@ The hardware I'm using is driven with a pair of harmonic drive servomotors for e
 It also includes support for taking a grid of photos to make a panoramic stitched photograph, by specifying starting and ending coordinates and then mapping the space between them.
 
 In work as a fun hobby project! GUI layout still very much in work.
+
+
+Hardware:
+Harmonic drive 24VDC 100:1
+3:1 timing belt gear reduction
+Roboclaw Ion motor controller
+Old Orion 4" telescope to start with
