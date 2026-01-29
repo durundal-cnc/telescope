@@ -8,7 +8,11 @@ In work as a fun hobby project! GUI layout still very much in work.
 
 
 Hardware:
+
 Harmonic drive 24VDC 100:1
+
 3:1 timing belt gear reduction
+
 Roboclaw Ion motor controller
+
 Old Orion 4" telescope to start with
