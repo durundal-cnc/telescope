@@ -794,10 +794,10 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
 
             #testing start (virtual controller)
             if az_dest_counts > az_encoder_value: #this doesn't 
-                az_encoder_value = az_encoder_value + 10
+                az_encoder_value = az_encoder_value + 100
                 config.Bit1_az = 0
             elif az_dest_counts < az_encoder_value:
-                az_encoder_value = az_encoder_value - 10
+                az_encoder_value = az_encoder_value - 100
                 config.Bit1_az = 1
             else:
                 #print('Az already in location')
@@ -805,10 +805,10 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
             #print('#####before el_encoder_value: ' + str(el_encoder_value) + ' el_dest_counts: ' + str(el_dest_counts) + 'config.el_angle_PV: ' + str(config.el_angle_PV))
                 
             if el_dest_counts > el_encoder_value:
-                el_encoder_value = el_encoder_value + 10
+                el_encoder_value = el_encoder_value + 100
                 config.Bit1_el = 0
             elif el_dest_counts < el_encoder_value:
-                el_encoder_value = el_encoder_value - 10
+                el_encoder_value = el_encoder_value - 100
                 config.Bit1_el = 1
             else:
                 #print('El already in location')

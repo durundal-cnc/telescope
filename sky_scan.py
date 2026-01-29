@@ -70,7 +70,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.checkbox import CheckBox
 from kivy.uix.scrollview import ScrollView
-
+from kivy_garden.matplotlib.backend_kivyagg import FigureCanvasKivyAgg #python -m pip install https://github.com/kivy-garden/matplotlib/archive/master.zip
 from kivy.clock import Clock
 
 
@@ -103,13 +103,107 @@ keep_running_app = True
 #Fine tune the pointing during tracking so it can converge on teh right value with the lookahead keeping velocity up (or just get close enough and proceed at constant velocity if the target will be in FOV?)
 #Elevation SV value below 0 goes negative (no wraparound code), causes issue when halt telescope called (big swing to those coordinates)
 #DONE blank the screen for compute_targets so obvisou when done calculating
-#add sun inclusion checking to the actual track checker
-#implement offline storage of all TLE for offline use if no internet
+#DONE add sun inclusion checking to the actual track checker
+#Decide what to have the sun checker do if sun is detected (don't execute? Go up to sun angle and stop? Warn with a popup or something but proceed?)
+#implement offline storage of all TLE for offline use if no internet (Celestrak has downloads?)
 #DONE - this is a bug in the fake roboclaw logic somewhere - manual negative command not wrapping around properly now? make sure not a bug in the non-Roboclaw connected code
 #investigate if driving to the first points at full speed until you get to near zero pointing error (it will be pulsey as it closes in) then engaging controlled speed as a binary works
-
+#install limit switches and get home function working
+#implement FITS format for photos (maybe? useful for stitching w/ metadata embedded?)
+#handle can't-find-object case gracefully (crashes out now)
+#idx, d2d, d3d = c.match_to_catalog_3d(catalog) #see if this can spit back the matched object in skycoordinates (since input may be partial match)
+#function to add: for location in sky, find objects within https://eteq-astropy.readthedocs.io/en/latest/coordinates/matchsep.html
+#adjust elevation from 0-180 to -90 to +90 for skycoordinate compatibility (? unsure how this is supposed to work)
 
 #tool to align telescope images for stitching: https://astroalign.quatrope.org/en/latest/
+
+def get_ra_dec(): #convert current alt-az angle to right ascension and declination
+    current_time = Time(datetime.now(timezone.utc)) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
+    loc = config.my_locs['EarthLocation']
+
+    sc = SkyCoord(alt=config.el_angle_SV*u.deg, az=config.az_angle_SV*u.deg, obstime = current_time, frame = 'altaz', location = loc)
+   # sc = SkyCoord(alt=config.az_angle_PV*u.deg, az=config.el_angle_PV*u.deg, frame=altaz_frame) #need to put in the iPhone compass direction offsets
+    icrs_coo = sc.transform_to('icrs')
+    print(f"RA/Dec: {icrs_coo.ra.deg} ({icrs_coo.ra.to_string(unit=u.hourangle, sep=':')}), {icrs_coo.dec.deg}")
+
+    return icrs_coo.ra.deg, icrs_coo.dec.deg
+
+def plot_nearby_stars(minimum_brightness_plot = 13, minimum_brightness_annotation = 6, radius = 10):
+    from astropy.table import QTable
+    from astroquery.gaia import Gaia
+    Gaia.ROW_LIMIT = 10000  # Set the row limit for returned data
+    
+    import numpy as np
+    from astropy.coordinates import SkyCoord, match_coordinates_sky
+    from astropy import units as u
+    
+    from astroquery.simbad import Simbad
+    
+    
+    #take earth location
+    loc = config.my_locs['EarthLocation']
+    current_time = Time(datetime.now(timezone.utc)) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
+    #take current az/el at that location
+    altaz_frame = AltAz(obstime=current_time, location=loc)
+    #error: thinks SkyCoord alt az should be -90 to +90 latitude??
+    print('alt ' + str(config.el_angle_PV) + ' az ' + str(config.az_angle_PV))
+    
+
+    sc = SkyCoord(alt=config.el_angle_PV*u.deg, az=config.az_angle_PV*u.deg, obstime = current_time, frame = 'altaz', location = loc)
+   # sc = SkyCoord(alt=config.az_angle_PV*u.deg, az=config.el_angle_PV*u.deg, frame=altaz_frame) #need to put in the iPhone compass direction offsets
+    icrs_coo = sc.transform_to('icrs')
+    print(f"RA/Dec: {icrs_coo.ra.deg}, {icrs_coo.dec.deg}")
+    
+    #import GAIA database of objects
+    #TODO: figure out how to store star catalog locally
+    #get list of objects within radius of that skycoord 
+    job = Gaia.cone_search_async(sc, radius=radius * u.deg)
+    ngc188_table = job.get_results()
+
+    # only keep stars brighter than G=19 magnitude
+    ngc188_table = ngc188_table[ngc188_table["phot_g_mean_mag"] < minimum_brightness_plot * u.mag] #13 is limit of ~4" telescope
+    
+    # add all ids in the SIMBAD results
+    Simbad.add_votable_fields('ids')
+    named = Simbad.query_objects(ngc188_table['designation'])
+    
+    
+    #for readability
+    import pandas as pd
+    p = ngc188_table.to_pandas()      #convert to Pandas dataframe
+    q = named.to_pandas()
+    #plot according to brightness
+    #gaia_dist = Distance(parallax=ngc188_table_3d["parallax"].filled(np.nan)) #unused
+    gaia_magnitude = ngc188_table["phot_g_mean_mag"].filled(np.nan)
+    
+    
+    
+    #plot and label so can match what seeing through eyepiece to what's on sky there
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(6.5, 5.2), constrained_layout=True)
+    cs = ax.scatter(
+        ngc188_table['ra'],
+        ngc188_table['dec'],
+        c=gaia_magnitude,
+        s=5, #marker size
+        vmin=min(gaia_magnitude),
+        vmax=max(gaia_magnitude),
+        cmap="gray",
+    )
+    cb = fig.colorbar(cs)
+    cb.set_label(f"magnitude")
+    
+    #restrict name plotting to brighter stars
+    for i, txt in enumerate(named['main_id']):
+        if ngc188_table['phot_g_mean_mag'][i] < minimum_brightness_annotation:
+            ax.annotate(txt, (ngc188_table['ra'][i], ngc188_table['dec'][i]), fontsize=8)
+    
+    ax.set_xlabel("RA [deg]")
+    ax.set_ylabel("Dec [deg]")
+    
+    ax.set_title("Gaia DR2 sources near NGC 188", fontsize=18)
+    return plt.gcf() 
+
 
 def import_iphone_data(): #get location and orientation data from phone airdrop of CSV sensor logs
     #https://github.com/seemoo-lab/opendrop
@@ -173,8 +267,8 @@ def initialize_config():
     config.state = 'idle'
     config.selected_target_dropdown = 0
     
-    config.az_angle_SV = 0 #degrees
-    config.el_angle_SV = 0 #degrees
+    config.az_angle_SV = 0 #degrees Azimuth is oriented East of North (i.e., N=0, E=90 degrees)
+    config.el_angle_SV = 0 #degrees Altitude/elevation: Zero and 180º is your horizon, and 90º is straight above (zenith)
     config.az_angle_PV = 0 #degrees
     config.el_angle_PV = 0 #degrees
     config.az_in_position = False
@@ -223,8 +317,8 @@ def initialize_config():
 
     my_locs = {'EarthLocation':EarthLocation(lat=lat * u.deg, lon = long * u.deg, height = altitude * u.m), 'compass_dir':compass_dir, 'mag_declination':mag_declination}
     config.my_locs = my_locs
-    config.mag_declination = mag_declination
-    config.compass_dir = compass_dir
+    config.mag_declination = 0# mag_declination #zero for debugging until can actually put phone on stage
+    config.compass_dir = 0 #compass_dir #zero for debugging until can actually put phone on stage
     
     #end user inputs (this should live in GUI someday)
 
@@ -236,6 +330,26 @@ def initialize_config():
 
 ######## GUI running
 
+######## Sun-keepout check function
+def check_sun_keepout(tracks,observations_start,observations_end):
+    #compute sun location for all observations
+    sun = astronomy(config.my_locs, target_name = 'Sun', timespacing = timedelta(seconds=1), timestart = observations_start, timeend = observations_end)
+    sun =[target_track(*i) for i in sun]#(*i) unpacks the list as an input to the namedtuple
+    
+    keep_out_radius = 5 #keep out degrees from the sun
+    sunintrusions = []
+    for track,sunloc in zip(tracks, sun):
+#        if abs(track.az-sunloc.az) < keepout and abs(track.el-sunloc.el) < keepout:
+        if (track.az-sunloc.az)**2 + (track.el - sunloc.el)**2 < keep_out_radius**2:
+            sunintrusions.append([track,sunloc])
+            print('intrusion into sun: ')    
+            print(track)
+                
+    print('Found ' + str(len(sunintrusions)) + ' sun keep out intrusions')
+    intrusions = set([x[0].target_name for x in sunintrusions])
+    print('Targets with sun intrustions: ' + str(intrusions))
+    return intrusions
+    
 
 ######## Get the target coordinates
 def compute_target_coords(target_list = [['sun','astronomy'], ['moon','astronomy'], ['polaris','astronomy'], ['M42', 'astronomy'], ['ISS', 'satellite_tracking'] ], coincident_times = False, duration=10):
@@ -270,7 +384,9 @@ def compute_target_coords(target_list = [['sun','astronomy'], ['moon','astronomy
         
                 print(mode)
             case 'point_and_shoot':
-                #
+                x = point_and_shoot(config.my_locs, FOV = 1, slew_speed = 5) #units degrees, degrees/sec
+                tracks = tracks +[target_track(*i) for i in x]#(*i) unpacks the list as an input to the namedtuple
+
                 print(mode)
             case _:
                 print(mode)
@@ -294,22 +410,26 @@ def compute_target_coords(target_list = [['sun','astronomy'], ['moon','astronomy
     observations_start = min(all_times)
     observations_end   = max(all_times)
     
-    #compute sun location for all observations
-    sun = astronomy(config.my_locs, target_name = 'Sun', timespacing = timedelta(seconds=1), timestart = observations_start, timeend = observations_end)
-    sun =[target_track(*i) for i in sun]#(*i) unpacks the list as an input to the namedtuple
     
-    keep_out_radius = 5 #keep out degrees from the sun
-    sunintrusions = []
-    for track,sunloc in zip(tracks, sun):
-#        if abs(track.az-sunloc.az) < keepout and abs(track.el-sunloc.el) < keepout:
-        if (track.az-sunloc.az)**2 + (track.el - sunloc.el)**2 < keep_out_radius**2:
-            sunintrusions.append([track,sunloc])
-            print('intrusion into sun: ')    
-            print(track)
-                
-    print('Found ' + str(len(sunintrusions)) + ' sun keep out intrusions')
-    intrusions = set([x[0].target_name for x in sunintrusions])
-    print('Targets with sun intrustions: ' + str(intrusions))
+    #moved to helper function
+    intrusions = check_sun_keepout(tracks,observations_start,observations_end)
+
+#     #compute sun location for all observations
+#     sun = astronomy(config.my_locs, target_name = 'Sun', timespacing = timedelta(seconds=1), timestart = observations_start, timeend = observations_end)
+#     sun =[target_track(*i) for i in sun]#(*i) unpacks the list as an input to the namedtuple
+#    
+#     keep_out_radius = 5 #keep out degrees from the sun
+#     sunintrusions = []
+#     for track,sunloc in zip(tracks, sun):
+# #        if abs(track.az-sunloc.az) < keepout and abs(track.el-sunloc.el) < keepout:
+#         if (track.az-sunloc.az)**2 + (track.el - sunloc.el)**2 < keep_out_radius**2:
+#             sunintrusions.append([track,sunloc])
+#             print('intrusion into sun: ')    
+#             print(track)
+#                
+#     print('Found ' + str(len(sunintrusions)) + ' sun keep out intrusions')
+#     intrusions = set([x[0].target_name for x in sunintrusions])
+#     print('Targets with sun intrustions: ' + str(intrusions))
     
     #add stop point or drop any sun intrusion runs
     
@@ -329,7 +449,7 @@ def compute_target_coords(target_list = [['sun','astronomy'], ['moon','astronomy
         if len(track)>1:
             first_coord = track[0]
             for idx, coord in enumerate(track[1:]):
-                #print(coord)
+                print(coord)
                 delta_time = (coord.time-first_coord.time).total_seconds() #time between coords in seconds
                 track[idx] = track[idx]._replace(az_vel = abs((coord.az  - first_coord.az)/delta_time)) #deg/sec
                 track[idx] = track[idx]._replace(el_vel = abs((coord.el  - first_coord.el)/delta_time)) #deg/sec
@@ -341,6 +461,8 @@ def compute_target_coords(target_list = [['sun','astronomy'], ['moon','astronomy
             return
     
     for key, value in individual_tracks.items(): #individual_tracks will have dict item for each track
+        print(key)
+        print(value)
         individual_tracks[key] = compute_velocities(value) #get the velocities between all the points
     
     return time_of_individual_tracks, name_of_individual_tracks, individual_tracks
@@ -429,7 +551,9 @@ async def run_telescope(root):
             
             root.trackprogressbar.value = coordinate_loc
             root.trackprogressbar.max = max(1, len(config.selected_target_coords))
-            root.az_PV.text = str("%07.3f" % config.az_angle_PV) + ' (' + str("%08.3f" % config.az_pointing_error) + ')' #update the angle display
+            
+            ra,dec = get_ra_dec()
+            root.az_PV.text = str("%07.3f" % config.az_angle_PV) + ' (' + str("%08.3f" % config.az_pointing_error) + ') ' + str("%05.1f" % ra) + ' ra ' + str("%05.1f" % dec) + 'dec'  #update the angle display
             #print('######## el PV from config: ' + str(config.el_angle_PV))
             root.el_PV.text = str("%07.3f" % config.el_angle_PV) + ' (' + str("%08.3f" % config.el_pointing_error) + ')' #update the angle display
 
@@ -542,6 +666,7 @@ async def run_telescope(root):
                     
             elif config.state == 'home':
                 print('Sending homing sequence')
+
                 #send the home command
                 
             elif config.state == 'point_and_shoot':
@@ -552,15 +677,15 @@ async def run_telescope(root):
                     #take photo
                     if len(config.selected_target_coords)>0:    
                         coord = config.selected_target_coords.pop(0)
-                        print('heading to ' + str(coord[1]) + ',' + str(coord[2]))
-                        stats, rc, address = telescope_control(rc, address=0x80,  cmd='move_az_el', coord = coord, lookahead = False) #tell telescope to stop where it is
+                        print('heading to ' + str(coord.az) + ',' + str(coord.el))
+                        stats, rc, address = telescope_control(rc, address=0x80,  cmd='move_az_el', coord = [coord.time, coord.az,coord.el], lookahead = False) #tell telescope to stop where it is
                     else:
                         #remove first photo (taken at start arbitrary position)
                         config.state = 'idle'
                         print('Done with point and shoot')
                 else:
                     try: #catch the first run where coord doesn't exist yet, but we want to not put in dummy starting points into the display
-                        stats, rc, address = telescope_control(rc, address=0x80, coord = coord, cmd='noop') #tell telescope to stop where it is
+                        stats, rc, address = telescope_control(rc, address=0x80, coord = [datetime.now(timezone.utc), 0, 0, 0, 0], cmd='noop') #tell telescope to stop where it is
                         #print('Az error: '+ str(config.az_pointing_error) + 'el error: ' + str(config.el_pointing_error))
                         continue
                     except:
@@ -646,10 +771,21 @@ class FloatInput(TextInput): #text input that only accepts numbers
         return super().insert_text(s, from_undo=from_undo)
 
 class MainScreen(GridLayout):
+    
+    
+#size_hint: defines the size of a widget as a fraction of the parent’s size. Values are restricted to the range 0.0 - 1.0, e.g. 0.01 = 1/100th of the parent’s size (1%) and 1.0 = same size as the parent (100%).
+#pos_hint: is used to place the widget relative to the parent.
+#The size_hint and pos_hint are used to calculate a widget’s size and position only if the value(s) are not set to None. If you set these values to None, the layout will not position/size the widget and you can specify the values (x, y, width, height) directly in screen coordinates.
 
     def __init__(self, nursery = None, **kwargs):
         super(MainScreen, self).__init__(**kwargs)
         self.nursery = nursery #used to close window = stop code
+        
+        #layout
+        #top level: controls (buttons)
+        #mid level: text display (console)
+        #bottom level: plot and images
+        
         
         self.cols = 3
         self.username = TextInput(multiline=False)
@@ -736,11 +872,13 @@ class MainScreen(GridLayout):
             self.manual_Az.text = str(float(self.manual_Az.text) + 1)
             print('The button <%s> is being pressed' % instance.text)
             self.manual_AzEl.trigger_action(0.1) # argument is for how long button should be pressed
+            get_ra_dec() #print here with button as placeholder
 
         def minus_Az_callback(instance):
             self.manual_Az.text = str(float(self.manual_Az.text) - 1)
             print('The button <%s> is being pressed' % instance.text)
             self.manual_AzEl.trigger_action(0.1) # argument is for how long button should be pressed
+            get_ra_dec() #print here with button as placeholder
 
         def plus_El_callback(instance):
             #self.manual_El.text = str(float(self.manual_El.text) + 1)
@@ -748,6 +886,7 @@ class MainScreen(GridLayout):
 
             print('The button <%s> is being pressed' % instance.text)
             self.manual_AzEl.trigger_action(0.1) # argument is for how long button should be pressed
+            get_ra_dec() #print here with button as placeholder
 
         def minus_El_callback(instance):
             #self.manual_El.text = str(float(self.manual_El.text) - 1)
@@ -755,6 +894,7 @@ class MainScreen(GridLayout):
 
             print('The button <%s> is being pressed' % instance.text)
             self.manual_AzEl.trigger_action(0.1) # argument is for how long button should be pressed
+            get_ra_dec() #print here with button as placeholder
 
         self.plus_Az_button = Button(text='+Az')
         self.plus_Az_button.bind(on_press=plus_Az_callback)
@@ -828,7 +968,10 @@ class MainScreen(GridLayout):
 
         self.point_and_shoot = Button(text='Point and shoot')
         def point_and_shoot_callback(instance):
-            config.selected_target_coords = point_and_shoot(config.my_locs, FOV = 1, slew_speed = 5) #units degrees, degrees/sec
+            self.time_of_individual_tracks, self.name_of_individual_tracks, self.individual_tracks = compute_target_coords(target_list=[['user_defined_pos', 'point_and_shoot']]) #default parameters used for point and shoot (start/end coords kept in config file)
+            print('length of self.individual_tracks ' + str(len(self.individual_tracks)))
+            print(self.individual_tracks)
+            config.selected_target_coords = self.individual_tracks['point_and_shoot_target_name']
             config.state = 'point_and_shoot'
         self.point_and_shoot.bind(on_release=point_and_shoot_callback)
         
@@ -980,6 +1123,7 @@ class MainScreen(GridLayout):
 
         def home_callback(instance):
             #config.state = 'home'
+            
             filename = datetime.now().strftime("%Y-%m-%d %H_%M_%S.%f")+".txt"
             folder = '/Users/andrewmiller/telescope/logs'
             with open(os.path.join(folder, filename), "w") as text_file:
@@ -994,6 +1138,19 @@ class MainScreen(GridLayout):
         def ok_button(instance):
             print('ok pressed')
             enable_buttons(disable = True)
+            #placeholder to update star plot
+            self.remove_widget(self.plot_window)
+            self.plot_window = FigureCanvasKivyAgg(figure = plot_nearby_stars(), size_hint_x = None, size_hint_y = None, height = 100)
+            self.plot_window.height = 500 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
+            self.plot_window.width = 1000 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
+            self.add_widget(self.plot_window)
+
+            #updating just the graph makes it resize (below)
+                        # self.plot_window.figure.clf()
+            # self.plot_window.figure = plot_nearby_stars()
+            # self.plot_window.draw()
+
+
         def cancel_button(instance):
             print('cancel pressed')
             enable_buttons(disable = False)
@@ -1034,6 +1191,14 @@ class MainScreen(GridLayout):
         self.scroll_tracks_display.add_widget(self.tracks_display)
 
         self.state_label = Label(text = config.state)
+
+        #myplot = plot_nearby_stars()
+        # if myplot is not None: 
+        #     print('myplot not None')
+        self.plot_window = FigureCanvasKivyAgg(figure = plot_nearby_stars(), size_hint_x = None, size_hint_y = None, height = 100)
+        #self.plot_window.figure=plot_nearby_stars()
+        self.plot_window.height = 500 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
+        self.plot_window.width = 1000 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
 
 
 #add the widgets in order
@@ -1091,6 +1256,8 @@ class MainScreen(GridLayout):
         self.add_widget(self.point_and_shoot_end)
         self.add_widget(self.point_and_shoot)
         
+        self.add_widget(self.plot_window)
+
 
         Window.bind(on_request_close=lambda *args: nursery.cancel_scope.cancel())
         

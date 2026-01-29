@@ -72,7 +72,7 @@ def point_and_shoot(my_locs, FOV = 1, slew_speed = 5): #units degrees, degrees/s
         for az in az_coords:            
             print('Computed coord ['+ str(x) +','+ str(y) + '] at ' + str(az) + ','+ str(el))
             t = datetime.now(timezone.utc) + timedelta(seconds=2) #1 second to move, 1 to settle (in the execution code)? Or just ignore the timestamp in the execution code?
-            target_time_az_el_list.append([t, az, el, slew_speed, slew_speed]) #the trailing 0 s are velocity placeholders, to be computed outside of this function
+            target_time_az_el_list.append(['point_and_shoot_target_name',t, az, el, slew_speed, slew_speed]) #the trailing 0 s are velocity placeholders, to be computed outside of this function
             x = x + 1
         y = y + 1
         x = 0
@@ -113,13 +113,14 @@ def astronomy(my_locs, target_name = 'moon', timespacing = timedelta(seconds=1),
     try:
         target = SkyCoord.from_name(target_name) #sky objects (outside of solar system)
     except Exception as e:
-        print('could not find target, trying body search')
+        print('could not find target as celestial object, trying in-solar-system body search')
         try:
             target = get_body(target_name, Time(timestart), location = my_loc) #in solar system bodies
         except Exception as e:
             print('could not find target or body')
             print(e)
             return ['Astronomy object not found']
+    print('The object ' + target_name + ' is found in the ' + target.get_constellation() + ' constellation')
 #            return ['invalid', 0, 0]
     #moon = get_body("moon", Time(telescope_time), location = my_loc)
     #sun = get_body("sun", Time(telescope_time), location = my_loc)
@@ -217,9 +218,12 @@ def satellite_tracking(my_locs, target_name = 'ISS', timespacing = timedelta(sec
             else:
                 print(nondecay_matcheds['NORAD_CAT_ID'])
                 norad_cat_id = int(nondecay_matcheds['NORAD_CAT_ID'].iloc[0])
+            print('Done looking through NORAD catalog, rolling with norad_cat_id = ' + str(norad_cat_id))
+
         else:
             print('unknown object, did not find in astronomy or satellite tracking')
-    print('rolling with norad_cat_id = ' + str(norad_cat_id))
+            return []
+
     timing = []
 
         
