@@ -124,7 +124,7 @@ def get_ra_dec(): #convert current alt-az angle to right ascension and declinati
     sc = SkyCoord(alt=config.el_angle_SV*u.deg, az=config.az_angle_SV*u.deg, obstime = current_time, frame = 'altaz', location = loc)
    # sc = SkyCoord(alt=config.az_angle_PV*u.deg, az=config.el_angle_PV*u.deg, frame=altaz_frame) #need to put in the iPhone compass direction offsets
     icrs_coo = sc.transform_to('icrs')
-    print(f"RA/Dec: {icrs_coo.ra.deg} ({icrs_coo.ra.to_string(unit=u.hourangle, sep=':')}), {icrs_coo.dec.deg}")
+   #print(f"RA/Dec: {icrs_coo.ra.deg} ({icrs_coo.ra.to_string(unit=u.hourangle, sep=':')}), {icrs_coo.dec.deg}")
 
     return icrs_coo.ra.deg, icrs_coo.dec.deg
 
@@ -140,63 +140,63 @@ def plot_nearby_stars(minimum_brightness_plot = 13, minimum_brightness_annotatio
     from astroquery.simbad import Simbad
     
     
-    #take earth location
-    loc = config.my_locs['EarthLocation']
-    current_time = Time(datetime.now(timezone.utc)) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
-    #take current az/el at that location
-    altaz_frame = AltAz(obstime=current_time, location=loc)
-    #error: thinks SkyCoord alt az should be -90 to +90 latitude??
-    print('alt ' + str(config.el_angle_PV) + ' az ' + str(config.az_angle_PV))
+   #  #take earth location
+   #  loc = config.my_locs['EarthLocation']
+   #  current_time = Time(datetime.now(timezone.utc)) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
+   #  #take current az/el at that location
+   #  altaz_frame = AltAz(obstime=current_time, location=loc)
+   #  #error: thinks SkyCoord alt az should be -90 to +90 latitude??
+   #  print('alt ' + str(config.el_angle_PV) + ' az ' + str(config.az_angle_PV))
     
 
-    sc = SkyCoord(alt=config.el_angle_PV*u.deg, az=config.az_angle_PV*u.deg, obstime = current_time, frame = 'altaz', location = loc)
-   # sc = SkyCoord(alt=config.az_angle_PV*u.deg, az=config.el_angle_PV*u.deg, frame=altaz_frame) #need to put in the iPhone compass direction offsets
-    icrs_coo = sc.transform_to('icrs')
-    print(f"RA/Dec: {icrs_coo.ra.deg}, {icrs_coo.dec.deg}")
+   #  sc = SkyCoord(alt=config.el_angle_PV*u.deg, az=config.az_angle_PV*u.deg, obstime = current_time, frame = 'altaz', location = loc)
+   # # sc = SkyCoord(alt=config.az_angle_PV*u.deg, az=config.el_angle_PV*u.deg, frame=altaz_frame) #need to put in the iPhone compass direction offsets
+   #  icrs_coo = sc.transform_to('icrs')
+   #  print(f"RA/Dec: {icrs_coo.ra.deg}, {icrs_coo.dec.deg}")
     
-    #import GAIA database of objects
-    #TODO: figure out how to store star catalog locally
-    #get list of objects within radius of that skycoord 
-    job = Gaia.cone_search_async(sc, radius=radius * u.deg)
-    ngc188_table = job.get_results()
+   #  #import GAIA database of objects
+   #  #TODO: figure out how to store star catalog locally
+   #  #get list of objects within radius of that skycoord 
+   #  job = Gaia.cone_search_async(sc, radius=radius * u.deg)
+   #  ngc188_table = job.get_results()
 
-    # only keep stars brighter than G=19 magnitude
-    ngc188_table = ngc188_table[ngc188_table["phot_g_mean_mag"] < minimum_brightness_plot * u.mag] #13 is limit of ~4" telescope
+   #  # only keep stars brighter than G=19 magnitude
+   #  ngc188_table = ngc188_table[ngc188_table["phot_g_mean_mag"] < minimum_brightness_plot * u.mag] #13 is limit of ~4" telescope
     
-    # add all ids in the SIMBAD results
-    Simbad.add_votable_fields('ids')
-    named = Simbad.query_objects(ngc188_table['designation'])
+   #  # add all ids in the SIMBAD results
+   #  Simbad.add_votable_fields('ids')
+   #  named = Simbad.query_objects(ngc188_table['designation'])
     
     
-    #for readability
-    import pandas as pd
-    p = ngc188_table.to_pandas()      #convert to Pandas dataframe
-    q = named.to_pandas()
-    #plot according to brightness
-    #gaia_dist = Distance(parallax=ngc188_table_3d["parallax"].filled(np.nan)) #unused
-    gaia_magnitude = ngc188_table["phot_g_mean_mag"].filled(np.nan)
+   #  #for readability
+   #  import pandas as pd
+   #  p = ngc188_table.to_pandas()      #convert to Pandas dataframe
+   #  q = named.to_pandas()
+   #  #plot according to brightness
+   #  #gaia_dist = Distance(parallax=ngc188_table_3d["parallax"].filled(np.nan)) #unused
+   #  gaia_magnitude = ngc188_table["phot_g_mean_mag"].filled(np.nan)
     
     
     
     #plot and label so can match what seeing through eyepiece to what's on sky there
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(6.5, 5.2), constrained_layout=True)
-    cs = ax.scatter(
-        ngc188_table['ra'],
-        ngc188_table['dec'],
-        c=gaia_magnitude,
-        s=5, #marker size
-        vmin=min(gaia_magnitude),
-        vmax=max(gaia_magnitude),
-        cmap="gray",
-    )
-    cb = fig.colorbar(cs)
-    cb.set_label(f"magnitude")
+    # cs = ax.scatter(
+    #     ngc188_table['ra'],
+    #     ngc188_table['dec'],
+    #     c=gaia_magnitude,
+    #     s=5, #marker size
+    #     vmin=min(gaia_magnitude),
+    #     vmax=max(gaia_magnitude),
+    #     cmap="gray",
+    # )
+    # cb = fig.colorbar(cs)
+    # cb.set_label(f"magnitude")
     
-    #restrict name plotting to brighter stars
-    for i, txt in enumerate(named['main_id']):
-        if ngc188_table['phot_g_mean_mag'][i] < minimum_brightness_annotation:
-            ax.annotate(txt, (ngc188_table['ra'][i], ngc188_table['dec'][i]), fontsize=8)
+    # #restrict name plotting to brighter stars
+    # for i, txt in enumerate(named['main_id']):
+    #     if ngc188_table['phot_g_mean_mag'][i] < minimum_brightness_annotation:
+    #         ax.annotate(txt, (ngc188_table['ra'][i], ngc188_table['dec'][i]), fontsize=8)
     
     ax.set_xlabel("RA [deg]")
     ax.set_ylabel("Dec [deg]")
@@ -286,8 +286,10 @@ def initialize_config():
     config.az_current = 0 #current draw in 10 mA increments
     config.el_current = 0
     
+    
     config.point_and_shoot_start = 0
     config.point_and_shoot_end = 0
+    config.point_and_shoot_FOV = 1 #field of view in degreees
     
 
     config.x = 0 #use for quit debugging
@@ -384,7 +386,7 @@ def compute_target_coords(target_list = [['sun','astronomy'], ['moon','astronomy
         
                 print(mode)
             case 'point_and_shoot':
-                x = point_and_shoot(config.my_locs, FOV = 1, slew_speed = 5) #units degrees, degrees/sec
+                x = point_and_shoot(config.my_locs, FOV = config.point_and_shoot_FOV, slew_speed = 5) #units degrees, degrees/sec
                 tracks = tracks +[target_track(*i) for i in x]#(*i) unpacks the list as an input to the namedtuple
 
                 print(mode)
@@ -553,7 +555,9 @@ async def run_telescope(root):
             root.trackprogressbar.max = max(1, len(config.selected_target_coords))
             
             ra,dec = get_ra_dec()
-            root.az_PV.text = str("%07.3f" % config.az_angle_PV) + ' (' + str("%08.3f" % config.az_pointing_error) + ') ' + str("%05.1f" % ra) + ' ra ' + str("%05.1f" % dec) + 'dec'  #update the angle display
+            root.ra_dec_display.text = str("%05.1f" % ra) + ' RA ' + str("%05.1f" % dec) + ' DEC'
+            
+            root.az_PV.text = str("%07.3f" % config.az_angle_PV) + ' (' + str("%08.3f" % config.az_pointing_error) + ') ' #update the angle display
             #print('######## el PV from config: ' + str(config.el_angle_PV))
             root.el_PV.text = str("%07.3f" % config.el_angle_PV) + ' (' + str("%08.3f" % config.el_pointing_error) + ')' #update the angle display
 
@@ -770,7 +774,7 @@ class FloatInput(TextInput): #text input that only accepts numbers
             )
         return super().insert_text(s, from_undo=from_undo)
 
-class MainScreen(GridLayout):
+class MainScreen(BoxLayout):
     
     
 #size_hint: defines the size of a widget as a fraction of the parent’s size. Values are restricted to the range 0.0 - 1.0, e.g. 0.01 = 1/100th of the parent’s size (1%) and 1.0 = same size as the parent (100%).
@@ -787,11 +791,47 @@ class MainScreen(GridLayout):
         #bottom level: plot and images
         
         
-        self.cols = 3
-        self.username = TextInput(multiline=False)
-
-        self.password = TextInput(password=True, multiline=False)
+        #self.cols = 1
+        self.orientation = 'vertical' #set the direction of the MainScreen BoxLayout top level layout
+        #self.top_level_layout = BoxLayout(orientation='vertical') #the overall window container
+        #self.top_level_layout.add_widget(Label(text='top box'))
+        #self.add_widget(self.top_level_layout)
         
+        self.top_box = BoxLayout(orientation='vertical', size_hint_y = 0.375)    #the boxes that hold the top, middle and bottom sections
+        self.mid_box = BoxLayout(orientation='horizontal', size_hint_y = 0.25) #two text fields (nominally track data and console output)
+        self.bot_box = BoxLayout(orientation='horizontal', size_hint_y = 0.375) #two images, star field and image from camera
+
+        self.add_widget(self.top_box)      #add the three sub-levels to the overall container
+        self.add_widget(self.mid_box)
+        self.add_widget(self.bot_box)
+
+        self.top_box_row1 = BoxLayout(orientation='horizontal') #sub-boxes to hold button control to the top section
+        self.top_box_row2 = BoxLayout(orientation='horizontal')
+        self.top_box_row3 = BoxLayout(orientation='horizontal')
+        self.top_box_row4 = BoxLayout(orientation='horizontal')
+        self.top_box_row5 = BoxLayout(orientation='horizontal')
+        self.top_box_row6 = BoxLayout(orientation='horizontal')
+        self.top_box_row7 = BoxLayout(orientation='horizontal')
+        #self.top_box_row8 = BoxLayout(orientation='horizontal')
+        #self.top_box_row9 = BoxLayout(orientation='horizontal')
+
+        #self.spacer = BoxLayout(orientation='horizontal')
+
+
+        self.top_box.add_widget(self.top_box_row1)
+        self.top_box.add_widget(self.top_box_row2)
+        self.top_box.add_widget(self.top_box_row3)
+        self.top_box.add_widget(self.top_box_row4)
+        self.top_box.add_widget(self.top_box_row5)
+        self.top_box.add_widget(self.top_box_row6)
+        self.top_box.add_widget(self.top_box_row7)
+        
+
+        #self.top_box.add_widget(self.top_box_row8)
+        #self.top_box.add_widget(self.top_box_row9)
+
+        #self.top_box.add_widget(self.spacer)
+
         target_pairs = []
         self.time_of_individual_tracks = tuple()
         self.name_of_individual_tracks = []
@@ -872,13 +912,11 @@ class MainScreen(GridLayout):
             self.manual_Az.text = str(float(self.manual_Az.text) + 1)
             print('The button <%s> is being pressed' % instance.text)
             self.manual_AzEl.trigger_action(0.1) # argument is for how long button should be pressed
-            get_ra_dec() #print here with button as placeholder
 
         def minus_Az_callback(instance):
             self.manual_Az.text = str(float(self.manual_Az.text) - 1)
             print('The button <%s> is being pressed' % instance.text)
             self.manual_AzEl.trigger_action(0.1) # argument is for how long button should be pressed
-            get_ra_dec() #print here with button as placeholder
 
         def plus_El_callback(instance):
             #self.manual_El.text = str(float(self.manual_El.text) + 1)
@@ -886,7 +924,6 @@ class MainScreen(GridLayout):
 
             print('The button <%s> is being pressed' % instance.text)
             self.manual_AzEl.trigger_action(0.1) # argument is for how long button should be pressed
-            get_ra_dec() #print here with button as placeholder
 
         def minus_El_callback(instance):
             #self.manual_El.text = str(float(self.manual_El.text) - 1)
@@ -894,7 +931,6 @@ class MainScreen(GridLayout):
 
             print('The button <%s> is being pressed' % instance.text)
             self.manual_AzEl.trigger_action(0.1) # argument is for how long button should be pressed
-            get_ra_dec() #print here with button as placeholder
 
         self.plus_Az_button = Button(text='+Az')
         self.plus_Az_button.bind(on_press=plus_Az_callback)
@@ -910,14 +946,14 @@ class MainScreen(GridLayout):
 
         ImageUrl = 'https://kivy.org/doc/stable/_static/logo-kivy.png'
 
-        self.iPhone_stats = Label(text='iPhone boot text')
-        self.roboclaw_stats = Label(text='roboclaw boot text')
+        self.iPhone_stats = Label(text='iPhone boot text', size_hint_x = 0.2)
+        self.roboclaw_stats = Label(text='roboclaw boot text', size_hint_x = 0.2)
         self.az_PV = Label(text='0.0')
         self.el_PV = Label(text='0.0')
-        self.current_target_stats = Label(text='Current target:')
+        self.current_target_stats = Label(text='Current target:', size_hint_x = 0.25)
         
-        self.duration_grid_layout = GridLayout(cols = 2)
-        self.duration = TextInput(hint_text='Duration in sec per track', input_filter = 'float', multiline=False, write_tab=False) #numeric only, tab moves to next object instead of writing \tab
+        self.duration_grid_layout = BoxLayout(orientation='horizontal')#GridLayout(cols = 2)
+        self.duration = TextInput(hint_text='Duration in sec per track', input_filter = 'float', multiline=False, write_tab=False, size_hint_x = 0.33) #numeric only, tab moves to next object instead of writing \tab
         self.duration.text = "1000"
         self.duration_label = Label(text='Track duration')
         self.duration_grid_layout.add_widget(self.duration)
@@ -936,11 +972,11 @@ class MainScreen(GridLayout):
         self.target_list_textinput.text = 'sun moon iss'
 
     
-        self.scroll_console = ScrollView(size_hint_y= None, scroll_type = ['bars', 'content'], bar_width = 13, bar_margin = 5, height = 200)
+        self.scroll_console = ScrollView(scroll_type = ['bars', 'content'], bar_width = 13, bar_margin = 5, size_hint_y = None)
         #dynamic heights her epossible, but tricky. Doesn't display scrolling behavior unless the text input is bigger than the scrollview
 #        self.tracks_display = TextInput(multiline=True, hint_text='Start times for tracks', input_filter = 'float', write_tab = False) #input for numeric manual Az degrees
-        self.console = TextInput(multiline=True, hint_text='console', write_tab = False, height =400, size_hint_y = None) #input for numeric manual Az degrees
-        self.console.text = 'console\nmore1\nmore2\nmore3\nmore4\n' #str([str(x) for x in self.individual_tracks])
+        self.console = TextInput(multiline=True, hint_text='console', write_tab = False) #input for numeric manual Az degrees
+        self.console.text = 'console\n' + '\n'.join(['more' + str(i) +'\n' for i in range(1,50)]) #'console\nmore1\nmore2\nmore3\nmore4\n' #str([str(x) for x in self.individual_tracks])
 
         self.scroll_console.add_widget(self.console)
 
@@ -987,6 +1023,19 @@ class MainScreen(GridLayout):
             self.console.text = self.console.text + 'Point and shoot end = ' + str(config.az_angle_PV) + ',' + str(config.el_angle_PV) + '\n'
 
         self.point_and_shoot_end.bind(on_release=point_and_shoot_end_callback)
+
+
+        def point_and_shoot_FOV_callback(instance):
+            config.point_and_shoot_FOV = float(self.point_and_shoot_FOV.text)
+        self.point_and_shoot_FOV = TextInput(hint_text='FOV degrees', input_filter = 'float', multiline=False, write_tab=False) #numeric only, tab moves to next object instead of writing \tab
+        self.point_and_shoot_FOV.text = "1"
+        self.point_and_shoot_FOV.bind(on_release=point_and_shoot_FOV_callback)
+        
+        self.point_and_shoot_FOV_layout = BoxLayout(orientation = 'horizontal')
+        self.point_and_shoot_FOV_layout.add_widget(self.point_and_shoot_FOV)
+        self.point_and_shoot_FOV_layout.add_widget(Label(text = 'FOV deg'))
+
+
 
         def enable_buttons(disable = True): #turns buttons on/off for tasks that take a long time e.g. compute targets     
             self.manual_Az.disabled = disable
@@ -1062,7 +1111,7 @@ class MainScreen(GridLayout):
                 # (disabling the size_hint_y) so the dropdown can calculate
                 # the area it needs.
             
-                target = Button(text='Value %d ' % index + target_pairs[index][0] , size_hint_y=None, height=44)
+                target = Button(text='Value %d ' % index + target_pairs[index][0] , size_hint_y=None)
             
                 # for each button, attach a callback that will call the select() method
                 # on the dropdown. We'll pass the text of the button as the data of the
@@ -1083,7 +1132,7 @@ class MainScreen(GridLayout):
             Clock.schedule_once(lambda dt: compute_targets(), 0)         
 
             
-        self.compute_targets = Button(text='Compute target coords', size_hint_y = None)
+        self.compute_targets = Button(text='Compute target coords')#, size_hint_y = None)
         self.compute_targets.bind(on_press=compute_targets_callback)
 
 
@@ -1094,7 +1143,7 @@ class MainScreen(GridLayout):
             self.manual_El.text = str(config.el_angle_PV)
             config.state = 'manual'
 
-        self.halt_telescope = Button(text='Halt telescope', size_hint_y = None)
+        self.halt_telescope = Button(text='Halt telescope')
         self.halt_telescope.bind(on_press=halt_telescope_callback)
 
         #choose new target
@@ -1107,10 +1156,10 @@ class MainScreen(GridLayout):
         #     print(len(target_pairs))
                 
 
-        self.select_target = Button(text='Select target', size_hint_y= None) #this is the main button for the dropdown (which contains other buttons and is hidden)
+        self.select_target = Button(text='Select target')#, size_hint_y= None) #this is the main button for the dropdown (which contains other buttons and is hidden)
         self.select_target.bind(on_release=self.dropdown.open)
 
-        self.trackprogressbar = ProgressBar(max=1000)#max=len(THE LENGTH OF THE TRACK))
+        self.trackprogressbar = ProgressBar(max=1000, size_hint_x = 0.75)#max=len(THE LENGTH OF THE TRACK))
         
         self.trackprogressbar.value = 750
         self.trackprogressbar.max = 10000
@@ -1118,7 +1167,7 @@ class MainScreen(GridLayout):
         def engage_track_callback(instance):
             config.state = 'track'
 
-        self.engage_track = Button(text='Engage track', size_hint_y= None) #this is the main button for the dropdown (which contains other buttons and is hidden)
+        self.engage_track = Button(text='Engage track') #this is the main button for the dropdown (which contains other buttons and is hidden)
         self.engage_track.bind(on_release=engage_track_callback)
 
         def home_callback(instance):
@@ -1131,7 +1180,7 @@ class MainScreen(GridLayout):
                 text_file.write(header)
                 text_file.write(config.log)
             print('Done writing log')
-        self.home = Button(text='Home', size_hint_y= None) #this is the main button for the dropdown (which contains other buttons and is hidden)
+        self.home = Button(text='Home') #this is the main button for the dropdown (which contains other buttons and is hidden)
         self.home.bind(on_release=home_callback)
 
 
@@ -1154,10 +1203,12 @@ class MainScreen(GridLayout):
         def cancel_button(instance):
             print('cancel pressed')
             enable_buttons(disable = False)
-        self.ok_cancel_grid_layout = GridLayout(rows = 2, height = self.console.height)
-        self.ok = Button(text='OK', size_hint_y= None) #this is the main button for the dropdown (which contains other buttons and is hidden)
+####        self.ok_cancel_grid_layout = GridLayout(rows = 2, height = self.console.height)
+        self.ok_cancel_grid_layout = BoxLayout(orientation = 'horizontal')
+
+        self.ok = Button(text='OK') #this is the main button for the dropdown (which contains other buttons and is hidden)
         self.ok.bind(on_release=ok_button)
-        self.cancel = Button(text='Cancel', size_hint_y= None) #this is the main button for the dropdown (which contains other buttons and is hidden)
+        self.cancel = Button(text='Cancel') #this is the main button for the dropdown (which contains other buttons and is hidden)
         self.cancel.bind(on_release=cancel_button)
         self.ok_cancel_grid_layout.add_widget(self.ok)
         self.ok_cancel_grid_layout.add_widget(self.cancel)
@@ -1166,7 +1217,7 @@ class MainScreen(GridLayout):
         def engage_track_callback(instance):
             config.state = 'track'
 
-        self.engage_track = Button(text='Engage track', size_hint_y= None) #this is the main button for the dropdown (which contains other buttons and is hidden)
+        self.engage_track = Button(text='Engage track') #this is the main button for the dropdown (which contains other buttons and is hidden)
         self.engage_track.bind(on_release=engage_track_callback)
 
 
@@ -1176,17 +1227,20 @@ class MainScreen(GridLayout):
                 print('The checkbox', self.automanual_checkbox, 'is active')
             else:
                 print('The checkbox', self.automanual_checkbox, 'is inactive')
-        self.automanual_checkbox = CheckBox(active = True)
+        self.automanual_checkbox = CheckBox(active = True, size_hint_x = 0.25)
         self.automanual_checkbox.bind(active=on_auto_checkbox_active)
-        self.automanual_label = Label(text='Auto next target')
+        self.automanual_label = Label(text='Auto next target', size_hint_x = 0.75)
         self.checkbox_grid_layout.add_widget(self.automanual_checkbox)
         self.checkbox_grid_layout.add_widget(self.automanual_label)
 
-        self.scroll_tracks_display = ScrollView(size_hint_y= None, scroll_type = ['bars', 'content'], bar_width = 13, bar_margin = 5, height = 200)
+        #self.scroll_tracks_display = ScrollView(size_hint_y= None, scroll_type = ['bars', 'content'], bar_width = 13, bar_margin = 5, height = 200)
+        self.scroll_tracks_display = ScrollView(scroll_type = ['bars', 'content'], bar_width = 13, bar_margin = 5, size_hint_y = None)
+
         #dynamic heights her epossible, but tricky. Doesn't display scrolling behavior unless the text input is bigger than the scrollview
-#        self.tracks_display = TextInput(multiline=True, hint_text='Start times for tracks', input_filter = 'float', write_tab = False) #input for numeric manual Az degrees
-        self.tracks_display = TextInput(multiline=True, hint_text='Start times for tracks', write_tab = False, height =400, size_hint_y = None) #input for numeric manual Az degrees
-        self.tracks_display.text = 'tracks and times\nmore1\nmore2\nmore3\nmore4\n' #str([str(x) for x in self.individual_tracks])
+#        self.tracks_display = TextInput(multiline=True, hint_text='Start times for tracks', write_tab = False, height =400, size_hint_y = None) #input for numeric manual Az degrees
+        self.tracks_display = TextInput(multiline=True, hint_text='Start times for tracks', write_tab = False) #input for numeric manual Az degrees
+        #self.tracks_display.text = 'tracks and times\nmore1\nmore2\nmore3\nmore4\n' #str([str(x) for x in self.individual_tracks])
+        self.tracks_display.text = 'tracks and times\n' + ''.join(['track' + str(i) +'\n' for i in range(1,50)]) #'console\nmore1\nmore2\nmore3\nmore4\n' #str([str(x) for x in self.individual_tracks])
 
         self.scroll_tracks_display.add_widget(self.tracks_display)
 
@@ -1195,68 +1249,162 @@ class MainScreen(GridLayout):
         #myplot = plot_nearby_stars()
         # if myplot is not None: 
         #     print('myplot not None')
-        self.plot_window = FigureCanvasKivyAgg(figure = plot_nearby_stars(), size_hint_x = None, size_hint_y = None, height = 100)
+        self.plot_window = FigureCanvasKivyAgg(figure = plot_nearby_stars(),  height = 100)
+        #self.plot_window = FigureCanvasKivyAgg(figure = plot_nearby_stars(), size_hint_x = None, size_hint_y = None, height = 100)
+
         #self.plot_window.figure=plot_nearby_stars()
         self.plot_window.height = 500 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
         self.plot_window.width = 1000 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
 
+        self.button_pressed = 0
+        def button0_callback(instance):
+            self.button_pressed = 0
+        def button1_callback(instance):
+            self.button_pressed = 1
+        def button2_callback(instance):
+            self.button_pressed = 2
+        def button3_callback(instance):
+            self.button_pressed = 3
+        def button4_callback(instance):
+            self.button_pressed = 4
+        def button5_callback(instance):
+            self.button_pressed = 5
+        def button6_callback(instance):
+            self.button_pressed = 6
+        def button7_callback(instance):
+            self.button_pressed = 7
+        def button8_callback(instance):
+            self.button_pressed = 8
+        def button9_callback(instance):
+            self.button_pressed = 9
 
-#add the widgets in order
-        self.add_widget(self.az_PV)
-        self.add_widget(self.el_PV)
-        self.add_widget(Label(text='<--- Az, El PVs'))
 
 
-        self.add_widget(self.manual_Az)
-        self.add_widget(self.manual_El)
-        self.add_widget(self.manual_AzEl)
-
-        self.add_widget(self.plus_Az_button)
-        self.add_widget(self.plus_El_button)
-        self.add_widget(self.checkbox_grid_layout)# automanual_checkbox)
-
-        self.add_widget(self.minus_Az_button)
-        self.add_widget(self.minus_El_button)
-        self.add_widget(self.duration_grid_layout)
 
 
-        self.add_widget(self.target_list_textinput)
-        self.add_widget(self.compute_targets)
-        self.add_widget(self.select_target)
+#add the widgets in order for gridlayout (big downside to using that one really)
+
+        self.ra_dec_display = Label(text = '', size_hint_x = 0.2)
+        self.az_PV.size_hint_x = 0.2
+        self.el_PV.size_hint_x = 0.2
+        self.state_label.size_hint_x = 0.2
+        self.point_and_shoot_FOV_layout.size_hint_x = 0.2
         
-        self.add_widget(self.current_target_stats)
-        self.add_widget(self.trackprogressbar) #(try to expand over 2 columns, labels as placeholders until then)
-        self.add_widget(self.state_label)
+        self.top_box_row1.add_widget(self.az_PV)
+        self.top_box_row1.add_widget(self.el_PV)
+        self.top_box_row1.add_widget(self.ra_dec_display)
+        self.top_box_row1.add_widget(self.point_and_shoot_FOV_layout)
+        #self.top_box_row1.add_widget(Label(text='<--- Az, El PVs'))
+        self.top_box_row1.add_widget(self.state_label)
+
+
+
+
+
+        self.top_box_row2.add_widget(self.manual_Az)
+        self.top_box_row2.add_widget(self.manual_El)
+        self.top_box_row2.add_widget(self.manual_AzEl)
+        self.top_box_row2.add_widget(self.point_and_shoot_start)
+        self.top_box_row2.add_widget(self.home)
 
 
         
-        self.add_widget(self.roboclaw_stats)
-        self.add_widget(self.iPhone_stats)
-        self.add_widget(AsyncImage(source=ImageUrl)) #display camera images
+        
 
+        self.top_box_row3.add_widget(self.plus_Az_button)
+        self.top_box_row3.add_widget(self.plus_El_button)
+        self.top_box_row3.add_widget(self.checkbox_grid_layout)# automanual_checkbox)
+        self.top_box_row3.add_widget(self.point_and_shoot_end)
+        self.top_box_row3.add_widget(self.engage_track)
+
+
+
+
+        self.top_box_row4.add_widget(self.minus_Az_button)
+        self.top_box_row4.add_widget(self.minus_El_button)
+        self.top_box_row4.add_widget(self.duration_grid_layout)
+        self.top_box_row4.add_widget(self.point_and_shoot)
+        self.top_box_row4.add_widget(self.halt_telescope)
+
+
+        self.target_list_textinput.size_hint_x = 0.4
+        self.compute_targets.size_hint_x = 0.2
+        self.select_target.size_hint_x = 0.2
+        self.ok_cancel_grid_layout.size_hint_x = 0.2
+        self.top_box_row5.add_widget(self.target_list_textinput)
+        self.top_box_row5.add_widget(self.compute_targets)
+        self.top_box_row5.add_widget(self.select_target)
+        self.top_box_row5.add_widget(self.ok_cancel_grid_layout)
+
+        
+        self.top_box_row6.add_widget(self.current_target_stats)
+        self.top_box_row6.add_widget(self.trackprogressbar) #(try to expand over 2 columns, labels as placeholders until then)
+
+        # self.add_widget(Label(text='password'))
+                
+        self.top_box_row7.add_widget(self.roboclaw_stats)
+        self.top_box_row7.add_widget(self.iPhone_stats)
+        button_size_hint = (1-0.4)/10
+        self.button0 = Button(text='0', size_hint_x = button_size_hint)
+        self.button1 = Button(text='1', size_hint_x = button_size_hint)
+        self.button2 = Button(text='2', size_hint_x = button_size_hint)
+        self.button3 = Button(text='3', size_hint_x = button_size_hint) 
+        self.button4 = Button(text='4', size_hint_x = button_size_hint)
+        self.button5 = Button(text='5', size_hint_x = button_size_hint)
+        self.button6 = Button(text='6', size_hint_x = button_size_hint)
+        self.button7 = Button(text='7', size_hint_x = button_size_hint)
+        self.button8 = Button(text='8', size_hint_x = button_size_hint)
+        self.button9 = Button(text='9', size_hint_x = button_size_hint)
+        self.top_box_row7.add_widget(self.button0)
+        self.top_box_row7.add_widget(self.button1)
+        self.top_box_row7.add_widget(self.button2)
+        self.top_box_row7.add_widget(self.button3)
+        self.top_box_row7.add_widget(self.button4)
+        self.top_box_row7.add_widget(self.button5)
+        self.top_box_row7.add_widget(self.button6)
+        self.top_box_row7.add_widget(self.button7)
+        self.top_box_row7.add_widget(self.button8)
+        self.top_box_row7.add_widget(self.button9)      
+        self.button0.bind(on_release=button0_callback)
+        self.button1.bind(on_release=button1_callback)
+        self.button2.bind(on_release=button2_callback)
+        self.button3.bind(on_release=button3_callback)
+        self.button4.bind(on_release=button4_callback)
+        self.button5.bind(on_release=button5_callback)
+        self.button6.bind(on_release=button6_callback)
+        self.button7.bind(on_release=button7_callback)
+        self.button8.bind(on_release=button8_callback)
+        self.button9.bind(on_release=button9_callback)
+
+
+        #configure the scrollbox and content heights
+        self.console.size_hint_y = None
+        self.console.height = max(self.console.minimum_height, self.scroll_console.height)
+        self.tracks_display.size_hint_y = None
+        self.tracks_display.height = max(self.tracks_display.minimum_height, self.scroll_tracks_display.height)
+        print('self.console.minimum_height ' + str(self.console.minimum_height) + ' self.scroll_console.height'  + str(self.scroll_console.height))
+        self.scroll_tracks_display.size_hint_y = 1
+        self.scroll_console.size_hint_y = 1
+
+        self.mid_box.add_widget(self.scroll_tracks_display)
+        self.mid_box.add_widget(self.scroll_console)
+        
         # self.add_widget(Label(text='Target list (name, method)'))
         # self.add_widget(Label(text='Manual El (deg)'))
         # self.add_widget(Label(text='Manual Az (deg)'))
 
-        self.add_widget(self.scroll_console)
-        self.add_widget(self.scroll_tracks_display)
-        self.add_widget(self.ok_cancel_grid_layout)
+
         #self.add_widget(Label(text='placeholder')) #self.add_widget(self.automanual_label)
 
         # self.add_widget(self.username)
         # self.add_widget(Label(text='User Name'))
         # self.add_widget(self.password)
 
-        # self.add_widget(Label(text='password'))
-        self.add_widget(self.home)
-        self.add_widget(self.engage_track)
-        self.add_widget(self.halt_telescope)
+
         
-        self.add_widget(self.point_and_shoot_start)
-        self.add_widget(self.point_and_shoot_end)
-        self.add_widget(self.point_and_shoot)
-        
-        self.add_widget(self.plot_window)
+
+        self.bot_box.add_widget(self.plot_window)
+        self.bot_box.add_widget(AsyncImage(source=ImageUrl)) #display camera images
 
 
         Window.bind(on_request_close=lambda *args: nursery.cancel_scope.cancel())
