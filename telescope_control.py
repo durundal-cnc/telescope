@@ -4,9 +4,19 @@ Created on Wed Jun 11 11:17:53 2025
 
 @author: AndrewMiller
 """
-import sys
-sys.path.append(r'/Users/andrewmiller/telescope/roboclaw_python')
-from roboclaw_3 import Roboclaw
+
+import sys, os
+if os.name == 'nt': #Windows 11
+    sys.path.append(r'C:\Users\andym\telescope')
+    sys.path.append(r'C:\Users\andym\telescope\roboclaw_python')
+elif os.name == 'posix':
+    sys.path.append(r'/Users/andrewmiller/telescope/')
+    sys.path.append(r'/Users/andrewmiller/telescope/roboclaw_python')
+
+from roboclaw_python.roboclaw_3 import Roboclaw
+
+
+#from roboclaw_3 import Roboclaw
 import math
 import config # https://docs.python.org/3/faq/programming.html#how-do-i-share-global-variables-across-modules
 from datetime import datetime, date, timezone, timedelta
@@ -88,7 +98,39 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
     # el_accel = 100000#counts/sec^2
     # el_speed_SV = 40000#counts/sec
     # el_deccel = 100000#counts/sec^2
-
+    
+    def get_roboclaw_registers(rc, address):
+        # stats = 'this is the roboclaw stats pull'
+        #print('Read errors in roboclaw registers')
+        status = rc.ReadError(address)[0]
+        status_list = [{'Normal' : status & 0x000000},
+        {'E_Stop' : status & 0x000001}, #this always seems to be set?
+        {'Temperature_Error' : status & 0x000002},
+        {'Temperature_2_Error' : status & 0x000004},
+        {'Main_Voltage_High_Error' : status & 0x000008},
+        {'Logic_Voltage_High_Error' : status & 0x000010},
+        {'Logic_Voltage_Low_Error' : status & 0x000020},
+        {'M1_Driver_Fault_Error' : status & 0x000040},
+        {'M2_Driver_Fault_Error' : status & 0x000080},
+        {'M1_Speed_Error' : status & 0x000100},
+        {'M2_Speed_Error' : status & 0x000200},
+        {'M1_Position_Error' : status & 0x000400},
+        {'M2_Position_Error' : status & 0x000800},
+        {'M1_Current_Error' : status & 0x001000},
+        {'M2_Current_Error' : status & 0x002000},
+        {'M1_Over_Current_Warning' : status & 0x010000},
+        {'M2_Over_Current_Warning' : status & 0x020000},
+        {'Main_Voltage_High_Warning' : status & 0x040000},
+        {'Main_Voltage_Low_Warning' : status & 0x080000},
+        {'Temperature_Warning' : status & 0x100000},
+        {'Temperature_2_Warning' : status & 0x200000},
+        {'S4_Signal_Triggered' : status & 0x400000},
+        {'S5_Signal_Triggered' : status & 0x800000},
+        {'Speed_Error_Limit_Warning' : status & 0x01000000},
+        {'Position_Error_Limit_Warning' : status & 0x02000000}]
+        stats = [stat for stat in status_list if list(stat.values())[0] != 0]
+        config.error_conds = status_list #store for display in the GUI
+        return stats
 
     
     if cmd == 'init':
@@ -113,7 +155,10 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
                 #Linux comport name
                 #rc = Roboclaw("/dev/tty.usbmodem1101",38400)
                 #rc = Roboclaw("/dev/tty.usbmodem212301",38400)
-                rc = Roboclaw("/dev/tty.usbmodem111201", 38400)
+                if os.name == 'nt': #Windows 11
+                    rc = Roboclaw("COM4",38400)
+                elif os.name == 'posix':
+                    rc = Roboclaw("/dev/tty.usbmodem111201", 38400)
 
                 roboclaw_success = rc.Open()
     
@@ -560,7 +605,51 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
     
     ###### Begin command processing
     if cmd == 'home_motors':
+        #TODO: add something to move off of the switches if happened to start parked there
+        #TODO: add home/park button swap on front panel (to park and unwind cable wrap on az/put el in a convenient spot)
+        
         print('homing motors')
+        buffer = 1
+        home_speed_counts = 5000
+        el_counts = rc.ReadEncM2(address)
+        max_counts = el_counts + el_counts_per_rev * (120/360) #stop after 120 degrees of motion
+        
+        #move into elevation home first
+        rc.SetPinFunctions(address, 1, 0, 2) #S3 is e-stop, home only for az, home and limits for el
+        #drive into switch
+        rc.SpeedAccelDeccelPositionM2(address, el_accel, home_speed_counts, el_deccel, max_counts, buffer) #(address, accel, speed, deccel, position, buffer)
+        found_el_limit = False
+        while el_counts <= max_counts or found_el_limit:
+            el_counts = rc.ReadEncM2(address)
+            stats = get_roboclaw_registers(rc, address)
+            if stats['S5_Signal_Triggered'] != 0:
+                found_el_limit = True
+            #update values in GUI
+        print('Out of El home sequence')
+        rc.DutyM2(address, 0) #stop motor
+
+
+        #move into azimuth home
+        rc.SetPinFunctions(address, 1, 2, 0) #S3 is e-stop, home only for az, home and limits for el
+        home_speed_counts = 5000
+        az_counts = rc.ReadEncM1(address)
+        max_counts = az_counts + az_counts_per_rev * (380/360) #stop after 380 degrees of motion
+
+        #drive into switch
+        rc.SpeedAccelDeccelPositionM1(address, az_accel, home_speed_counts, az_deccel, max_counts, buffer) #(address, accel, speed, deccel, position, buffer)
+        found_az_limit = False
+        while az_counts <= max_counts or found_az_limit:
+            az_counts = rc.ReadEncM1(address)
+            stats = get_roboclaw_registers(rc, address)
+            if stats['S4_Signal_Triggered'] != 0:
+                found_az_limit = True
+            #update values in GUI
+        print('Out of Az home sequence')
+        rc.DutyM1(address, 0) #stop motor
+
+        #set to E-stop, no function on other pins
+        rc.SetPinFunctions(address, 1, 0, 0) #S3 is e-stop, home only for az, home and limits for el
+        print('Done with homing, e-stop enabled and home switches disabled')
         #Home motors
             #rotate into sensors at constant velocity
             #record where sensor pulsed

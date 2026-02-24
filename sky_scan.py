@@ -4,6 +4,16 @@ Created on Tue Jun 10 10:28:56 2025
 
 @author: AndrewMiller
 """
+###IMPORT NOTES:
+
+#error of AttributeError: 'FigureCanvasKivyAgg' object has no attribute 'resize_event'
+# That is a bug that was recently fixed, but you need to install the updated kivy garden matplotlib like this:
+# python -m pip install https://github.com/kivy-garden/matplotlib/archive/master.zip
+# See the github source.
+# And you will need to change your import from kivy.garden to kivy_garden.
+
+
+
 import astropy.units as u
 from astropy.time import Time
 from time import sleep
@@ -22,8 +32,17 @@ import pandas as pd
 import zipfile
 import shutil
 from collections import namedtuple
+import os
+if os.name == 'nt': #Windows 11
+    sys.path.append(r'C:\Users\andym\telescope')
+    sys.path.append(r'C:\Users\andym\telescope\roboclaw_python')
+    root_name = r'C:\Users\andym\telescope'
+elif os.name == 'posix':
+    sys.path.append(r'/Users/andrewmiller/telescope/')
+    sys.path.append(r'/Users/andrewmiller/telescope/roboclaw_python')
+    root_name = r'/Users/andymiller/telescope'
 
-sys.path.append(r'/Users/andrewmiller/telescope/')
+
 
 #my functions
 import config # https://docs.python.org/3/faq/programming.html#how-do-i-share-global-variables-across-modules
@@ -34,10 +53,8 @@ import tracking_modes #library of different pointing modes
 from tracking_modes import astronomy, satellite_tracking, point_and_shoot
 
 import sys
-sys.path.append(r'/Users/andrewmiller/telescope/roboclaw_python')
-from roboclaw_3 import Roboclaw
+#from roboclaw_3 import Roboclaw
 import math
-import config # https://docs.python.org/3/faq/programming.html#how-do-i-share-global-variables-across-modules
 from datetime import datetime, date, timezone, timedelta
 
 #GUI tools, using Beeware
@@ -70,7 +87,10 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.checkbox import CheckBox
 from kivy.uix.scrollview import ScrollView
+
+#see install notes for when this doesn't work and errors with AttributeError: 'FigureCanvasKivyAgg' object has no attribute 'resize_event'
 from kivy_garden.matplotlib.backend_kivyagg import FigureCanvasKivyAgg #python -m pip install https://github.com/kivy-garden/matplotlib/archive/master.zip
+
 from kivy.clock import Clock
 
 
@@ -101,19 +121,24 @@ keep_running_app = True
 #DONE figure out why a second track isn't working right (wrong coordinates?) without rebooting program (coordinate times are in the future - only getting set on boot?)
 #DONE figure out how to make program close gracefully
 #Fine tune the pointing during tracking so it can converge on teh right value with the lookahead keeping velocity up (or just get close enough and proceed at constant velocity if the target will be in FOV?)
-#Elevation SV value below 0 goes negative (no wraparound code), causes issue when halt telescope called (big swing to those coordinates)
 #DONE blank the screen for compute_targets so obvisou when done calculating
 #DONE add sun inclusion checking to the actual track checker
 #Decide what to have the sun checker do if sun is detected (don't execute? Go up to sun angle and stop? Warn with a popup or something but proceed?)
 #implement offline storage of all TLE for offline use if no internet (Celestrak has downloads?)
 #DONE - this is a bug in the fake roboclaw logic somewhere - manual negative command not wrapping around properly now? make sure not a bug in the non-Roboclaw connected code
 #investigate if driving to the first points at full speed until you get to near zero pointing error (it will be pulsey as it closes in) then engaging controlled speed as a binary works
-#install limit switches and get home function working
 #implement FITS format for photos (maybe? useful for stitching w/ metadata embedded?)
-#handle can't-find-object case gracefully (crashes out now)
 #idx, d2d, d3d = c.match_to_catalog_3d(catalog) #see if this can spit back the matched object in skycoordinates (since input may be partial match)
-#function to add: for location in sky, find objects within https://eteq-astropy.readthedocs.io/en/latest/coordinates/matchsep.html
+#DONE function to add: for location in sky, find objects within https://eteq-astropy.readthedocs.io/en/latest/coordinates/matchsep.html
+
+#handle can't-find-object case gracefully (crashes out now)
+#install limit switches and get home function working
 #adjust elevation from 0-180 to -90 to +90 for skycoordinate compatibility (? unsure how this is supposed to work)
+#Elevation SV value below 0 goes negative (no wraparound code), causes issue when halt telescope called (big swing to those coordinates)
+#make pressing teh RA/DEC a button that populates the star chart
+#check that point and shoot can handle wraparound on az ok (e.g. start at 1 deg and go to 359 deg without spinning around)
+
+
 
 #tool to align telescope images for stitching: https://astroalign.quatrope.org/en/latest/
 
@@ -140,63 +165,63 @@ def plot_nearby_stars(minimum_brightness_plot = 13, minimum_brightness_annotatio
     from astroquery.simbad import Simbad
     
     
-   #  #take earth location
-   #  loc = config.my_locs['EarthLocation']
-   #  current_time = Time(datetime.now(timezone.utc)) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
-   #  #take current az/el at that location
-   #  altaz_frame = AltAz(obstime=current_time, location=loc)
-   #  #error: thinks SkyCoord alt az should be -90 to +90 latitude??
-   #  print('alt ' + str(config.el_angle_PV) + ' az ' + str(config.az_angle_PV))
+    #take earth location
+    loc = config.my_locs['EarthLocation']
+    current_time = Time(datetime.now(timezone.utc)) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
+    #take current az/el at that location
+    altaz_frame = AltAz(obstime=current_time, location=loc)
+    #error: thinks SkyCoord alt az should be -90 to +90 latitude??
+    print('alt ' + str(config.el_angle_PV) + ' az ' + str(config.az_angle_PV))
     
 
-   #  sc = SkyCoord(alt=config.el_angle_PV*u.deg, az=config.az_angle_PV*u.deg, obstime = current_time, frame = 'altaz', location = loc)
-   # # sc = SkyCoord(alt=config.az_angle_PV*u.deg, az=config.el_angle_PV*u.deg, frame=altaz_frame) #need to put in the iPhone compass direction offsets
-   #  icrs_coo = sc.transform_to('icrs')
-   #  print(f"RA/Dec: {icrs_coo.ra.deg}, {icrs_coo.dec.deg}")
+    sc = SkyCoord(alt=config.el_angle_PV*u.deg, az=config.az_angle_PV*u.deg, obstime = current_time, frame = 'altaz', location = loc)
+   # sc = SkyCoord(alt=config.az_angle_PV*u.deg, az=config.el_angle_PV*u.deg, frame=altaz_frame) #need to put in the iPhone compass direction offsets
+    icrs_coo = sc.transform_to('icrs')
+    print(f"RA/Dec: {icrs_coo.ra.deg}, {icrs_coo.dec.deg}")
     
-   #  #import GAIA database of objects
-   #  #TODO: figure out how to store star catalog locally
-   #  #get list of objects within radius of that skycoord 
-   #  job = Gaia.cone_search_async(sc, radius=radius * u.deg)
-   #  ngc188_table = job.get_results()
+    #import GAIA database of objects
+    #TODO: figure out how to store star catalog locally
+    #get list of objects within radius of that skycoord 
+    job = Gaia.cone_search_async(sc, radius=radius * u.deg)
+    ngc188_table = job.get_results()
 
-   #  # only keep stars brighter than G=19 magnitude
-   #  ngc188_table = ngc188_table[ngc188_table["phot_g_mean_mag"] < minimum_brightness_plot * u.mag] #13 is limit of ~4" telescope
+    # only keep stars brighter than G=19 magnitude
+    ngc188_table = ngc188_table[ngc188_table["phot_g_mean_mag"] < minimum_brightness_plot * u.mag] #13 is limit of ~4" telescope
     
-   #  # add all ids in the SIMBAD results
-   #  Simbad.add_votable_fields('ids')
-   #  named = Simbad.query_objects(ngc188_table['designation'])
+    # add all ids in the SIMBAD results
+    Simbad.add_votable_fields('ids')
+    named = Simbad.query_objects(ngc188_table['designation'])
     
     
-   #  #for readability
-   #  import pandas as pd
-   #  p = ngc188_table.to_pandas()      #convert to Pandas dataframe
-   #  q = named.to_pandas()
-   #  #plot according to brightness
-   #  #gaia_dist = Distance(parallax=ngc188_table_3d["parallax"].filled(np.nan)) #unused
-   #  gaia_magnitude = ngc188_table["phot_g_mean_mag"].filled(np.nan)
+    #for readability
+    import pandas as pd
+    p = ngc188_table.to_pandas()      #convert to Pandas dataframe
+    q = named.to_pandas()
+    #plot according to brightness
+    #gaia_dist = Distance(parallax=ngc188_table_3d["parallax"].filled(np.nan)) #unused
+    gaia_magnitude = ngc188_table["phot_g_mean_mag"].filled(np.nan)
     
     
     
     #plot and label so can match what seeing through eyepiece to what's on sky there
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(6.5, 5.2), constrained_layout=True)
-    # cs = ax.scatter(
-    #     ngc188_table['ra'],
-    #     ngc188_table['dec'],
-    #     c=gaia_magnitude,
-    #     s=5, #marker size
-    #     vmin=min(gaia_magnitude),
-    #     vmax=max(gaia_magnitude),
-    #     cmap="gray",
-    # )
-    # cb = fig.colorbar(cs)
-    # cb.set_label(f"magnitude")
+    cs = ax.scatter(
+        ngc188_table['ra'],
+        ngc188_table['dec'],
+        c=gaia_magnitude,
+        s=5, #marker size
+        vmin=min(gaia_magnitude),
+        vmax=max(gaia_magnitude),
+        cmap="gray",
+    )
+    cb = fig.colorbar(cs)
+    cb.set_label(f"magnitude")
     
-    # #restrict name plotting to brighter stars
-    # for i, txt in enumerate(named['main_id']):
-    #     if ngc188_table['phot_g_mean_mag'][i] < minimum_brightness_annotation:
-    #         ax.annotate(txt, (ngc188_table['ra'][i], ngc188_table['dec'][i]), fontsize=8)
+    #restrict name plotting to brighter stars
+    for i, txt in enumerate(named['main_id']):
+        if ngc188_table['phot_g_mean_mag'][i] < minimum_brightness_annotation:
+            ax.annotate(txt, (ngc188_table['ra'][i], ngc188_table['dec'][i]), fontsize=8)
     
     ax.set_xlabel("RA [deg]")
     ax.set_ylabel("Dec [deg]")
@@ -213,7 +238,8 @@ def import_iphone_data(): #get location and orientation data from phone airdrop 
     
     
     #unpack zip
-    zip_file_loc = r'/Users/andrewmiller/telescope/14360_SE_Eastgate_Way-2025-07-18_17-03-55.zip'
+    zip_file_name = '209_NW_60th_St-2026-02-24_21-54-57.zip'
+    zip_file_loc = os.path.join(root_name, zip_file_name)#r'/Users/andrewmiller/telescope/14360_SE_Eastgate_Way-2025-07-18_17-03-55.zip'
     with zipfile.ZipFile(zip_file_loc, 'r') as zip_ref:
         unzip_dir = os.path.join(os.path.dirname(zip_file_loc),'iPhone_metadata')
         if os.path.exists(unzip_dir):
@@ -222,7 +248,7 @@ def import_iphone_data(): #get location and orientation data from phone airdrop 
         zip_ref.extractall(unzip_dir)
     
     #import files
-    sensor_files = r'/Users/andrewmiller/telescope/iPhone_metadata'
+    sensor_files = os.path.join(root_name, 'iPhone_metadata')#r'/Users/andrewmiller/telescope/iPhone_metadata'
     files = [ name for name in os.listdir(sensor_files) if name[-4:] == '.csv' ]
     return_dict = {}
     for file in files:
@@ -1253,8 +1279,8 @@ class MainScreen(BoxLayout):
         #self.plot_window = FigureCanvasKivyAgg(figure = plot_nearby_stars(), size_hint_x = None, size_hint_y = None, height = 100)
 
         #self.plot_window.figure=plot_nearby_stars()
-        self.plot_window.height = 500 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
-        self.plot_window.width = 1000 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
+####        self.plot_window.height = 500 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
+####        self.plot_window.width = 1000 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
 
         self.button_pressed = 0
         def button0_callback(instance):
