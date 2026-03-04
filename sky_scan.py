@@ -73,6 +73,7 @@ from kivy.properties import (
 from kivy.clock import Clock
 from kivy.animation import Animation
 from kivy.uix.screenmanager import Screen
+from kivy.core.window import Window
 
 from kivy.app import App, async_runTouchApp
 from kivy.uix.gridlayout import GridLayout
@@ -153,7 +154,7 @@ def get_ra_dec(): #convert current alt-az angle to right ascension and declinati
 
     return icrs_coo.ra.deg, icrs_coo.dec.deg
 
-def plot_nearby_stars(minimum_brightness_plot = 13, minimum_brightness_annotation = 6, radius = 10):
+def plot_nearby_stars(minimum_brightness_plot = 13, minimum_brightness_annotation = 6, radius = 10, init = False):
     from astropy.table import QTable
     from astroquery.gaia import Gaia
     Gaia.ROW_LIMIT = 10000  # Set the row limit for returned data
@@ -164,65 +165,66 @@ def plot_nearby_stars(minimum_brightness_plot = 13, minimum_brightness_annotatio
     
     from astroquery.simbad import Simbad
     
+    if not init: #display a blank chart until user clicks button to request star chart (takes a while to produce)
+        #take earth location
+        loc = config.my_locs['EarthLocation']
+        current_time = Time(datetime.now(timezone.utc)) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
+        #take current az/el at that location
+        altaz_frame = AltAz(obstime=current_time, location=loc)
+        #error: thinks SkyCoord alt az should be -90 to +90 latitude??
+        print('alt ' + str(config.el_angle_PV) + ' az ' + str(config.az_angle_PV))
+        
     
-    #take earth location
-    loc = config.my_locs['EarthLocation']
-    current_time = Time(datetime.now(timezone.utc)) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
-    #take current az/el at that location
-    altaz_frame = AltAz(obstime=current_time, location=loc)
-    #error: thinks SkyCoord alt az should be -90 to +90 latitude??
-    print('alt ' + str(config.el_angle_PV) + ' az ' + str(config.az_angle_PV))
+        sc = SkyCoord(alt=config.el_angle_PV*u.deg, az=config.az_angle_PV*u.deg, obstime = current_time, frame = 'altaz', location = loc)
+       # sc = SkyCoord(alt=config.az_angle_PV*u.deg, az=config.el_angle_PV*u.deg, frame=altaz_frame) #need to put in the iPhone compass direction offsets
+        icrs_coo = sc.transform_to('icrs')
+        print(f"RA/Dec: {icrs_coo.ra.deg}, {icrs_coo.dec.deg}")
+        
+        #import GAIA database of objects
+        #TODO: figure out how to store star catalog locally
+        #get list of objects within radius of that skycoord 
+        job = Gaia.cone_search_async(sc, radius=radius * u.deg)
+        ngc188_table = job.get_results()
     
-
-    sc = SkyCoord(alt=config.el_angle_PV*u.deg, az=config.az_angle_PV*u.deg, obstime = current_time, frame = 'altaz', location = loc)
-   # sc = SkyCoord(alt=config.az_angle_PV*u.deg, az=config.el_angle_PV*u.deg, frame=altaz_frame) #need to put in the iPhone compass direction offsets
-    icrs_coo = sc.transform_to('icrs')
-    print(f"RA/Dec: {icrs_coo.ra.deg}, {icrs_coo.dec.deg}")
-    
-    #import GAIA database of objects
-    #TODO: figure out how to store star catalog locally
-    #get list of objects within radius of that skycoord 
-    job = Gaia.cone_search_async(sc, radius=radius * u.deg)
-    ngc188_table = job.get_results()
-
-    # only keep stars brighter than G=19 magnitude
-    ngc188_table = ngc188_table[ngc188_table["phot_g_mean_mag"] < minimum_brightness_plot * u.mag] #13 is limit of ~4" telescope
-    
-    # add all ids in the SIMBAD results
-    Simbad.add_votable_fields('ids')
-    named = Simbad.query_objects(ngc188_table['designation'])
-    
-    
-    #for readability
-    import pandas as pd
-    p = ngc188_table.to_pandas()      #convert to Pandas dataframe
-    q = named.to_pandas()
-    #plot according to brightness
-    #gaia_dist = Distance(parallax=ngc188_table_3d["parallax"].filled(np.nan)) #unused
-    gaia_magnitude = ngc188_table["phot_g_mean_mag"].filled(np.nan)
-    
+        # only keep stars brighter than G=19 magnitude
+        ngc188_table = ngc188_table[ngc188_table["phot_g_mean_mag"] < minimum_brightness_plot * u.mag] #13 is limit of ~4" telescope
+        
+        # add all ids in the SIMBAD results
+        Simbad.add_votable_fields('ids')
+        named = Simbad.query_objects(ngc188_table['designation'])
+        
+        
+        #for readability
+        import pandas as pd
+        p = ngc188_table.to_pandas()      #convert to Pandas dataframe
+        q = named.to_pandas()
+        #plot according to brightness
+        #gaia_dist = Distance(parallax=ngc188_table_3d["parallax"].filled(np.nan)) #unused
+        gaia_magnitude = ngc188_table["phot_g_mean_mag"].filled(np.nan)
+        
     
     
     #plot and label so can match what seeing through eyepiece to what's on sky there
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(6.5, 5.2), constrained_layout=True)
-    cs = ax.scatter(
-        ngc188_table['ra'],
-        ngc188_table['dec'],
-        c=gaia_magnitude,
-        s=5, #marker size
-        vmin=min(gaia_magnitude),
-        vmax=max(gaia_magnitude),
-        cmap="gray",
-    )
-    cb = fig.colorbar(cs)
-    cb.set_label(f"magnitude")
-    
-    #restrict name plotting to brighter stars
-    for i, txt in enumerate(named['main_id']):
-        if ngc188_table['phot_g_mean_mag'][i] < minimum_brightness_annotation:
-            ax.annotate(txt, (ngc188_table['ra'][i], ngc188_table['dec'][i]), fontsize=8)
-    
+    if not init:
+        cs = ax.scatter(
+            ngc188_table['ra'],
+            ngc188_table['dec'],
+            c=gaia_magnitude,
+            s=5, #marker size
+            vmin=min(gaia_magnitude),
+            vmax=max(gaia_magnitude),
+            cmap="gray",
+        )
+        cb = fig.colorbar(cs)
+        cb.set_label(f"magnitude")
+        
+        #restrict name plotting to brighter stars
+        for i, txt in enumerate(named['main_id']):
+            if ngc188_table['phot_g_mean_mag'][i] < minimum_brightness_annotation:
+                ax.annotate(txt, (ngc188_table['ra'][i], ngc188_table['dec'][i]), fontsize=8)
+        
     ax.set_xlabel("RA [deg]")
     ax.set_ylabel("Dec [deg]")
     
@@ -809,6 +811,7 @@ class MainScreen(BoxLayout):
 
     def __init__(self, nursery = None, **kwargs):
         super(MainScreen, self).__init__(**kwargs)
+
         self.nursery = nursery #used to close window = stop code
         
         #layout
@@ -1213,17 +1216,7 @@ class MainScreen(BoxLayout):
         def ok_button(instance):
             print('ok pressed')
             enable_buttons(disable = True)
-            #placeholder to update star plot
-            self.remove_widget(self.plot_window)
-            self.plot_window = FigureCanvasKivyAgg(figure = plot_nearby_stars(), size_hint_x = None, size_hint_y = None, height = 100)
-            self.plot_window.height = 500 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
-            self.plot_window.width = 1000 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
-            self.add_widget(self.plot_window)
 
-            #updating just the graph makes it resize (below)
-                        # self.plot_window.figure.clf()
-            # self.plot_window.figure = plot_nearby_stars()
-            # self.plot_window.draw()
 
 
         def cancel_button(instance):
@@ -1275,7 +1268,7 @@ class MainScreen(BoxLayout):
         #myplot = plot_nearby_stars()
         # if myplot is not None: 
         #     print('myplot not None')
-        self.plot_window = FigureCanvasKivyAgg(figure = plot_nearby_stars(),  height = 100)
+        self.plot_window = FigureCanvasKivyAgg(figure = plot_nearby_stars(init = True),  height = 100)
         #self.plot_window = FigureCanvasKivyAgg(figure = plot_nearby_stars(), size_hint_x = None, size_hint_y = None, height = 100)
 
         #self.plot_window.figure=plot_nearby_stars()
@@ -1310,7 +1303,23 @@ class MainScreen(BoxLayout):
 
 #add the widgets in order for gridlayout (big downside to using that one really)
 
-        self.ra_dec_display = Label(text = '', size_hint_x = 0.2)
+        self.ra_dec_display = Button(text = '', size_hint_x = 0.2)
+        def ra_dec_display_callback(instance):            
+            #placeholder to update star plot
+            self.remove_widget(self.plot_window)
+            self.plot_window = FigureCanvasKivyAgg(figure = plot_nearby_stars(), size_hint_x = None, size_hint_y = None, height = 100)
+            self.plot_window.height = 500 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
+            self.plot_window.width = 1000 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
+            self.add_widget(self.plot_window)
+
+            #updating just the graph makes it resize (below)
+                        # self.plot_window.figure.clf()
+            # self.plot_window.figure = plot_nearby_stars()
+            # self.plot_window.draw()
+        self.ra_dec_display.bind(on_release=ra_dec_display_callback)
+
+
+        
         self.az_PV.size_hint_x = 0.2
         self.el_PV.size_hint_x = 0.2
         self.state_label.size_hint_x = 0.2
@@ -1433,11 +1442,13 @@ class MainScreen(BoxLayout):
         self.bot_box.add_widget(AsyncImage(source=ImageUrl)) #display camera images
 
 
-        Window.bind(on_request_close=lambda *args: nursery.cancel_scope.cancel())
-        
+        #Window.bind(on_request_close=lambda *args: nursery.cancel_scope.cancel())
+        Window.bind(on_request_close=self.on_window_close)
+
     def on_window_close(self, *args):
         if self.nursery:
             self.nursery.cancel_scope.cancel() #closes code running in nursery
+        Window.close()
         return False
 
 #sun astronomy moon astronomy m43 astronomy venus astronomy
@@ -1474,7 +1485,6 @@ if __name__ == '__main__':
         app = App.get_running_app()
         if app:
             app.stop()
-        #root.close()
     trio.run(root_func)
 
         
