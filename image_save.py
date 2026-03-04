@@ -4,25 +4,35 @@ Created on Thu Jun 12 09:58:25 2025
 
 @author: AndrewMiller
 """
-from PIL import Image
 import os
 import config # https://docs.python.org/3/faq/programming.html#how-do-i-share-global-variables-across-modules
+import cv2 
+import time
 
 def image_save(queues):
-
-    savepath = r'/Users/andrewmiller/telescope/images'
     print('Starting image_save thread')
+    
+    if os.name == 'nt': #Windows 11
+        savepath = r'C:\users\andym\telescope\images'
+    elif os.name == 'posix':
+        savepath = r'/Users/andrewmiller/telescope/images'
     
     while not config.end_program:
         config.image_process_ready = True #signal loop is ready
         
-        size = queues['image_save_q'].qsize() #check that an image is in the queue
-        if size >= 1:
-            img_q = queues['image_save_q'].get(block=False) 
-            filename = img_q['filename']
-            img = img_q['img']
-            print('saving ' + filename)
-            #im = Image.fromarray(img)
-            img.save(os.path.join(savepath, filename))
-            print('done saving ' + filename)
+        if len(config.photos) > 0:
+            frame, filename = config.photos.pop()
+    
+            print('JPEG start'+ str(round(time.time() * 1000)))
+            is_success, jpg_encoded = cv2.imencode(".jpg", frame)
+            print('JPEG end'+ str(round(time.time() * 1000)))
+            
+            print('JPEG print start'+ str(round(time.time() * 1000)))
+            print(bytes(jpg_encoded).hex()) #need to add newline?
+            print('JPEG print end '+ str(round(time.time() * 1000)))
+
+            print('imwrite start' + str(round(time.time() * 1000)))
+            cv2.imwrite(os.path.join(savepath, filename+'.jpg'), frame) 
+            print('imwrite end ' + str(round(time.time() * 1000)))
+        
     print('Terminating image_save thread')

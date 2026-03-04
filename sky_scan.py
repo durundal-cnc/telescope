@@ -138,7 +138,7 @@ keep_running_app = True
 #Elevation SV value below 0 goes negative (no wraparound code), causes issue when halt telescope called (big swing to those coordinates)
 #make pressing teh RA/DEC a button that populates the star chart
 #check that point and shoot can handle wraparound on az ok (e.g. start at 1 deg and go to 359 deg without spinning around)
-
+#add single photo and continunous photo toggles (end of progress line)
 
 
 #tool to align telescope images for stitching: https://astroalign.quatrope.org/en/latest/
@@ -314,6 +314,10 @@ def initialize_config():
     config.az_current = 0 #current draw in 10 mA increments
     config.el_current = 0
     
+    config.sec_between_photos = 1 #time between photos for continuous photos in camera_control
+    config.take_photo = False #tells camera_control to take a single photo
+    config.take_photo2 = False #tells camera_control to take continuous photos
+    config.photos = [] #list of photos to be saved to disk in memory
     
     config.point_and_shoot_start = 0
     config.point_and_shoot_end = 0
@@ -855,6 +859,10 @@ class MainScreen(BoxLayout):
         self.top_box.add_widget(self.top_box_row6)
         self.top_box.add_widget(self.top_box_row7)
         
+        self.bot_box_left = BoxLayout(orientation='horizontal')
+        self.bot_box_right = BoxLayout(orientation='horizontal')
+        self.bot_box.add_widget(self.bot_box_left)
+        self.bot_box.add_widget(self.bot_box_right)
 
         #self.top_box.add_widget(self.top_box_row8)
         #self.top_box.add_widget(self.top_box_row9)
@@ -1306,12 +1314,11 @@ class MainScreen(BoxLayout):
         self.ra_dec_display = Button(text = '', size_hint_x = 0.2)
         def ra_dec_display_callback(instance):            
             #placeholder to update star plot
-            self.remove_widget(self.plot_window)
-            self.plot_window = FigureCanvasKivyAgg(figure = plot_nearby_stars(), size_hint_x = None, size_hint_y = None, height = 100)
-            self.plot_window.height = 500 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
-            self.plot_window.width = 1000 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
-            self.add_widget(self.plot_window)
-
+            self.bot_box_left.remove_widget(self.plot_window)
+            self.plot_window = FigureCanvasKivyAgg(figure = plot_nearby_stars() , size_hint_x = 0.5)
+            #self.plot_window.height = 500 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
+            #self.plot_window.width = 1000 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
+            self.bot_box_left.add_widget(self.plot_window)
             #updating just the graph makes it resize (below)
                         # self.plot_window.figure.clf()
             # self.plot_window.figure = plot_nearby_stars()
@@ -1434,12 +1441,9 @@ class MainScreen(BoxLayout):
         # self.add_widget(self.username)
         # self.add_widget(Label(text='User Name'))
         # self.add_widget(self.password)
-
-
         
-
-        self.bot_box.add_widget(self.plot_window)
-        self.bot_box.add_widget(AsyncImage(source=ImageUrl)) #display camera images
+        self.bot_box_left.add_widget(self.plot_window)
+        self.bot_box_right.add_widget(AsyncImage(source=ImageUrl)) #display camera images
 
 
         #Window.bind(on_request_close=lambda *args: nursery.cancel_scope.cancel())
