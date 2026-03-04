@@ -8,20 +8,22 @@ import os
 import config # https://docs.python.org/3/faq/programming.html#how-do-i-share-global-variables-across-modules
 import cv2 
 import time
+import trio 
 
-def image_save(queues):
+async def image_save(root):
     print('Starting image_save thread')
-    
+
     if os.name == 'nt': #Windows 11
         savepath = r'C:\users\andym\telescope\images'
     elif os.name == 'posix':
         savepath = r'/Users/andrewmiller/telescope/images'
     
     while not config.end_program:
+        await trio.sleep(0.01) #checkpoint without blocking (e.g. GUI can operate now)
         config.image_process_ready = True #signal loop is ready
         
         if len(config.photos) > 0:
-            frame, filename = config.photos.pop()
+            frame, filename = config.photos.pop(0)
     
             print('JPEG start'+ str(round(time.time() * 1000)))
             is_success, jpg_encoded = cv2.imencode(".jpg", frame)

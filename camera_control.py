@@ -13,10 +13,12 @@ import cv2
 import numpy as np
 import time
 import sys
+import trio
+from kivy.core.image import Image as CoreImage
 
 #NOTE: the cv2 CAP_DSHOW and CAP_MSMF are windows specific, need to rewrite if using Linux or Mac
 
-def camera_control(queues):
+async def camera_control(root):
 
     #initialize camera
     print('starting camera thread')
@@ -31,7 +33,7 @@ def camera_control(queues):
         #import matplotlib.pyplot as plt
         
         #get camera number
-        camera = 1
+        camera = 0
         whitebalance = 'auto'
         exposure = 'auto'
         resolution = 'HD'
@@ -80,6 +82,8 @@ def camera_control(queues):
         photo = False
         
         while(config.end_program is False):
+            await trio.sleep(0.01) #checkpoint without blocking (e.g. GUI can operate now)
+
             config.camera_process_ready = True #signal loop is ready
             i = i + 1
             
@@ -109,7 +113,8 @@ def camera_control(queues):
     
                 filename = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
                 config.photos.append([filename, frame]) #add photo and timestamp to the list of photos for display (sky_scan) and storage (image_save)
-
+                root.displayed_image.texture = CoreImage(frame, ext='png').texture
+                root.displayed_image.reload()
 
                 print('size:' + str(frame.shape) + '     '+ str(ret) +'       i=' + str(i)) #tells labview the photo size for scaling
 

@@ -74,12 +74,15 @@ from kivy.clock import Clock
 from kivy.animation import Animation
 from kivy.uix.screenmanager import Screen
 from kivy.core.window import Window
+from kivy.core.image import Image as CoreImage
+
 
 from kivy.app import App, async_runTouchApp
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
+from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.image import AsyncImage
 from kivy.uix.dropdown import DropDown
 from kivy.uix.checkbox import CheckBox
@@ -88,11 +91,15 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.checkbox import CheckBox
 from kivy.uix.scrollview import ScrollView
-
+from kivy.uix.image import Image
 #see install notes for when this doesn't work and errors with AttributeError: 'FigureCanvasKivyAgg' object has no attribute 'resize_event'
 from kivy_garden.matplotlib.backend_kivyagg import FigureCanvasKivyAgg #python -m pip install https://github.com/kivy-garden/matplotlib/archive/master.zip
 
 from kivy.clock import Clock
+
+
+#Logging: to suppress the debug and info fields, [main user]\.kivy\config.ini has parameter to change (log_level)
+#this suppresses the Kivy messages, but Matplotlib spits out a ton by deault: matplotlib.pyplot.set_loglevel (level = 'warning')
 
 
 from functools import partial
@@ -136,7 +143,7 @@ keep_running_app = True
 #install limit switches and get home function working
 #adjust elevation from 0-180 to -90 to +90 for skycoordinate compatibility (? unsure how this is supposed to work)
 #Elevation SV value below 0 goes negative (no wraparound code), causes issue when halt telescope called (big swing to those coordinates)
-#make pressing teh RA/DEC a button that populates the star chart
+#DONE make pressing teh RA/DEC a button that populates the star chart
 #check that point and shoot can handle wraparound on az ok (e.g. start at 1 deg and go to 359 deg without spinning around)
 #add single photo and continunous photo toggles (end of progress line)
 
@@ -206,6 +213,8 @@ def plot_nearby_stars(minimum_brightness_plot = 13, minimum_brightness_annotatio
     
     #plot and label so can match what seeing through eyepiece to what's on sky there
     import matplotlib.pyplot as plt
+    plt.set_loglevel(level = 'warning') #disable the thousands of [DEBUG   ] font messages
+
     fig, ax = plt.subplots(figsize=(6.5, 5.2), constrained_layout=True)
     if not init:
         cs = ax.scatter(
@@ -316,7 +325,7 @@ def initialize_config():
     
     config.sec_between_photos = 1 #time between photos for continuous photos in camera_control
     config.take_photo = False #tells camera_control to take a single photo
-    config.take_photo2 = False #tells camera_control to take continuous photos
+    config.take_photos = False #tells camera_control to take continuous photos
     config.photos = [] #list of photos to be saved to disk in memory
     
     config.point_and_shoot_start = 0
@@ -1196,7 +1205,7 @@ class MainScreen(BoxLayout):
         self.select_target = Button(text='Select target')#, size_hint_y= None) #this is the main button for the dropdown (which contains other buttons and is hidden)
         self.select_target.bind(on_release=self.dropdown.open)
 
-        self.trackprogressbar = ProgressBar(max=1000, size_hint_x = 0.75)#max=len(THE LENGTH OF THE TRACK))
+        self.trackprogressbar = ProgressBar()#max=len(THE LENGTH OF THE TRACK))
         
         self.trackprogressbar.value = 750
         self.trackprogressbar.max = 10000
@@ -1325,6 +1334,28 @@ class MainScreen(BoxLayout):
             # self.plot_window.draw()
         self.ra_dec_display.bind(on_release=ra_dec_display_callback)
 
+        self.single_photo = Button(text = 'Single')
+        def single_photo_callback(instance):
+            config.photo = True
+        self.single_photo.bind(on_release=single_photo_callback)
+        
+        self.time_between_photos = TextInput(hint_text='sec between photos', input_filter = 'float', multiline=False, write_tab=False) #numeric only, tab moves to next object instead of writing \tab
+        def time_between_photos_callback(instance):
+            config.sec_between_photos = float(self.time_between_photos.text)
+        self.time_between_photos.text = "1"
+        self.time_between_photos.bind(on_release=time_between_photos_callback)
+        
+        def continuous_photos_callback(instance):
+            if self.continuous_photos.state == 'down':
+                print('toggle set to cont')
+                config.take_photos = True
+            else:
+                print('toggle set to off')
+                config.take_photos = False
+        self.continuous_photos = ToggleButton(text = 'Cont.')
+        self.continuous_photos.bind(on_release = continuous_photos_callback)
+        
+        
 
         
         self.az_PV.size_hint_x = 0.2
@@ -1378,9 +1409,19 @@ class MainScreen(BoxLayout):
         self.top_box_row5.add_widget(self.select_target)
         self.top_box_row5.add_widget(self.ok_cancel_grid_layout)
 
-        
+        self.current_target_stats.size_hint_x = 0.3
+        self.trackprogressbar.size_hint_x = 0.3
+        self.single_photo.size_hint_x = 0.1
+        self.time_between_photos.size_hint_x = 0.2
+        self.continuous_photos.size_hint_x = 0.1
+
         self.top_box_row6.add_widget(self.current_target_stats)
         self.top_box_row6.add_widget(self.trackprogressbar) #(try to expand over 2 columns, labels as placeholders until then)
+        self.top_box_row6.add_widget(self.single_photo)
+        self.top_box_row6.add_widget(self.time_between_photos)
+        self.top_box_row6.add_widget(self.continuous_photos)
+
+
 
         # self.add_widget(Label(text='password'))
                 
@@ -1443,7 +1484,9 @@ class MainScreen(BoxLayout):
         # self.add_widget(self.password)
         
         self.bot_box_left.add_widget(self.plot_window)
-        self.bot_box_right.add_widget(AsyncImage(source=ImageUrl)) #display camera images
+        self.displayed_image = Image(source="")
+        self.bot_box_right.add_widget(self.displayed_image)
+        #self.bot_box_right.add_widget(AsyncImage(source=ImageUrl)) #display camera images
 
 
         #Window.bind(on_request_close=lambda *args: nursery.cancel_scope.cancel())
@@ -1486,6 +1529,8 @@ if __name__ == '__main__':
             at the `with` level. '''
             nursery.start_soon(run_app_GUI, root, nursery)
             nursery.start_soon(run_telescope, root)
+            nursery.start_soon(camera_control, root)
+            nursery.start_soon(image_save, root)
         app = App.get_running_app()
         if app:
             app.stop()

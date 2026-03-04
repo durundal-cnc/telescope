@@ -156,7 +156,7 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
                 #rc = Roboclaw("/dev/tty.usbmodem1101",38400)
                 #rc = Roboclaw("/dev/tty.usbmodem212301",38400)
                 if os.name == 'nt': #Windows 11
-                    rc = Roboclaw("COM4",38400)
+                    rc = Roboclaw("COM5",38400)
                 elif os.name == 'posix':
                     rc = Roboclaw("/dev/tty.usbmodem111201", 38400)
 
