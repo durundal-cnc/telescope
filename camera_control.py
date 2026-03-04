@@ -15,6 +15,9 @@ import time
 import sys
 import trio
 from kivy.core.image import Image as CoreImage
+from PIL import Image
+from io import BytesIO
+from kivy.graphics.texture import Texture
 
 #NOTE: the cv2 CAP_DSHOW and CAP_MSMF are windows specific, need to rewrite if using Linux or Mac
 
@@ -35,7 +38,7 @@ async def camera_control(root):
         #get camera number
         camera = 0
         whitebalance = 'auto'
-        exposure = 'auto'
+        exposure = -4
         resolution = 'HD'
         fps = 30
         config.focus = 'auto'
@@ -65,21 +68,26 @@ async def camera_control(root):
             wb = vid.set(cv2.CAP_PROP_TEMPERATURE, whitebalance) #whitebalance is in Kelvin min=2800 max=6500
         print('White balance set: ' + whitebalance + '='+str(wb))
         if exposure == 'auto':        
+            #note: auto-exposure can slow down camera considerably (at least for built in camera)
             ex = vid.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
         else:
             ex = vid.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0)
             ex = vid.set(cv2.CAP_PROP_EXPOSURE, exposure)#I believe the values are negative power of 2, e.g. -4 would be 1/16
-        print('exposure set: ' + exposure + '=' +str(ex))
+        print('exposure set: ' +str(ex))
     
         vid.set(cv2.CAP_PROP_BUFFERSIZE, 1) #keep only the most recent frame
         vid.set(cv2.CAP_PROP_FRAME_WIDTH, size[0])
         vid.set(cv2.CAP_PROP_FRAME_HEIGHT, size[1])
         vid.set(cv2.CAP_PROP_FPS, fps)
+        vid.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G')) #supposed to give good frame rates
+        #vid.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG")) # add this line
+
     
         i = 0
         old_focus = '' #initialize
         last_photo = datetime.now(timezone.utc)
         photo = False
+        attempt_focus = True #not all cameras support, so disable so timeout doesn't slow it down
         
         while(config.end_program is False):
             await trio.sleep(0.01) #checkpoint without blocking (e.g. GUI can operate now)
@@ -88,7 +96,7 @@ async def camera_control(root):
             i = i + 1
             
             focus = config.focus #get the autofocus or manual focus value
-            if  old_focus != focus: #if change to focus setting
+            if  old_focus != focus and attempt_focus: #if change to focus setting
                 if focus == 'auto':
                     focus_success = vid.set(cv2.CAP_PROP_AUTOFOCUS, 1) # turn the autofocus on
                 else: 
@@ -97,6 +105,10 @@ async def camera_control(root):
                     focus_success = focus_success1 and focus_success2
                 if focus_success:
                     old_focus = focus
+                else:
+                    attempt_focus = False
+            
+            
             
             if config.take_photo:
                 photo = True
@@ -104,23 +116,62 @@ async def camera_control(root):
             if config.take_photos:
                 if datetime.now(timezone.utc) >= last_photo + timedelta(seconds = config.sec_between_photos):
                     photo = True
+                    last_photo = datetime.now(timezone.utc)
+            #capture and display photos continuously on screen
+            # print('camera read 1'+ str(round(time.time() * 1000)))
+            ret, frame = vid.read() #double read is a hack to clear buffer (only for when doing long timelapse stuff where the stream isn't polled regularly)
+            # print('camera read 2'+ str(round(time.time() * 1000)))
+            #ret, frame = vid.read() 
+            # print('camera read 3'+ str(round(time.time() * 1000)))
+
+            # print('im start'+ str(round(time.time() * 1000)))
+            # print('size:' + str(frame.shape) + '    ret: '+ str(ret) + '     ' + str(attempt_focus) + '       i=' + str(i)) #tells labview the photo size for scaling
+            # im = Image.fromarray(frame) #display the image in Kivy
+            # print('im end'+ str(round(time.time() * 1000)))
             
-            if photo: #save photo
+            # print('byte_io start'+ str(round(time.time() * 1000)))
+            # byte_io = BytesIO()
+            # print('byte_io end'+ str(round(time.time() * 1000)))
+            
+            # print('new process start'+ str(round(time.time() * 1000)))
+            w, h, _ = frame.shape
+            buf = bytes(np.flipud(frame))
+            texture = Texture.create(size=(h, w))
+            texture.blit_buffer(buf, colorfmt='rgb', bufferfmt='ubyte')
+            # print('new process end'+ str(round(time.time() * 1000)))
+            
+            
+            
+            # print('save start'+ str(round(time.time() * 1000)))
+            # im.save(byte_io, format='PNG')
+            # print('save end'+ str(round(time.time() * 1000)))
+            
+            # print('pointer start'+ str(round(time.time() * 1000)))
+            # byte_io.seek(0)
+            # print('pointer end'+ str(round(time.time() * 1000)))
+
+            # print('texture start'+ str(round(time.time() * 1000)))
+            # root.displayed_image.texture = CoreImage(byte_io, ext='png').texture
+            root.displayed_image.texture = texture
+
+            # print('texture end'+ str(round(time.time() * 1000)))
+
+            # print('reload start'+ str(round(time.time() * 1000)))
+            root.displayed_image.reload()
+            # print('reload end'+ str(round(time.time() * 1000)))
+
+            # print('old focus: ' + str(old_focus) + ' focus: ' + str(focus))
+
+            #consider reducing size of displayed graphic to make faster? seems very slow and weird though)
+            
+            if photo: #take photo
+                print('taking photo')
                 photo = False
+                config.take_photo = False #reset for single shots (for continuous the toggle has to be disabled by the user)
     
-                ret, frame = vid.read() #double read is a hack to clear buffer
-                ret, frame = vid.read() 
-    
-                filename = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+                filename = datetime.now().strftime('%Y-%m-%d_%H-%M-%S.%f')
                 config.photos.append([filename, frame]) #add photo and timestamp to the list of photos for display (sky_scan) and storage (image_save)
-                root.displayed_image.texture = CoreImage(frame, ext='png').texture
-                root.displayed_image.reload()
-
-                print('size:' + str(frame.shape) + '     '+ str(ret) +'       i=' + str(i)) #tells labview the photo size for scaling
-
-                print('old focus: ' + str(old_focus) + ' focus: ' + str(focus))
-    
-            
+                
         print('close windows and camera')
         # After the loop release the cap object 
         vid.release() 

@@ -327,6 +327,9 @@ def initialize_config():
     config.take_photo = False #tells camera_control to take a single photo
     config.take_photos = False #tells camera_control to take continuous photos
     config.photos = [] #list of photos to be saved to disk in memory
+    config.exposure = 'auto'
+    config.whitebalance = 'auto'
+    config.focus = 'auto'
     
     config.point_and_shoot_start = 0
     config.point_and_shoot_end = 0
@@ -1336,7 +1339,7 @@ class MainScreen(BoxLayout):
 
         self.single_photo = Button(text = 'Single')
         def single_photo_callback(instance):
-            config.photo = True
+            config.take_photo = True
         self.single_photo.bind(on_release=single_photo_callback)
         
         self.time_between_photos = TextInput(hint_text='sec between photos', input_filter = 'float', multiline=False, write_tab=False) #numeric only, tab moves to next object instead of writing \tab
