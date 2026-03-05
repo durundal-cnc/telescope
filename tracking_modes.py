@@ -52,7 +52,16 @@ def point_and_shoot(my_locs, FOV = 1, slew_speed = 5): #units degrees, degrees/s
         target_time_az_el_list=[[datetime.now(timezone.utc), az_start, el_start, slew_speed, slew_speed]] #the trailing 0 s are velocity placeholders, to be computed outside of this function
         return target_time_az_el_list
     
-    az_dist = az_end-az_start #need to implement 360 rollover check
+    #360 rollover check
+    az_dist_raw = abs(az_start-az_end) #get total distance (limited to 0-360 here but could be more arbitrarily)
+    az_dist_mod = az_dist_raw % 360 #get mod of full circle
+    if az_dist_mod > 180: #choose the shorter path around the circle
+        az_dist = 360 - az_dist_mod
+        dir_sign = -1
+    else:
+        az_dist = az_dist_mod
+        dir_sign = 1
+    
     el_dist = el_end-el_start
     
     az_step_num = math.ceil(az_dist/(FOV)) #how many steps to take
@@ -60,7 +69,7 @@ def point_and_shoot(my_locs, FOV = 1, slew_speed = 5): #units degrees, degrees/s
     az_step_size = az_dist/az_step_num
     el_step_size = el_dist/el_step_num
     
-    az_coords = [az_start + x*az_step_size for x in range(az_step_num+1)] #+1 because we want photos at the endpoints on both sides
+    az_coords = [(az_start + x*az_step_size*dir_sign)%360 for x in range(az_step_num+1)] #+1 because we want photos at the endpoints on both sides
     el_coords = [el_start + x*el_step_size for x in range(el_step_num+1)]
 
     target_time_az_el_list = []

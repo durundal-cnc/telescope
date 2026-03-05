@@ -141,12 +141,13 @@ keep_running_app = True
 
 #handle can't-find-object case gracefully (crashes out now)
 #install limit switches and get home function working
-#adjust elevation from 0-180 to -90 to +90 for skycoordinate compatibility (? unsure how this is supposed to work)
-#Elevation SV value below 0 goes negative (no wraparound code), causes issue when halt telescope called (big swing to those coordinates)
+#DONE adjust elevation from 0-180 to -90 to +90 for skycoordinate compatibility (? unsure how this is supposed to work)
+#DONE Elevation SV value below 0 goes negative (no wraparound code), causes issue when halt telescope called (big swing to those coordinates)
 #DONE make pressing teh RA/DEC a button that populates the star chart
-#check that point and shoot can handle wraparound on az ok (e.g. start at 1 deg and go to 359 deg without spinning around)
-#add single photo and continunous photo toggles (end of progress line)
-
+#TODO check DONE check that point and shoot can handle wraparound on az ok (e.g. start at 1 deg and go to 359 deg without spinning around)
+#TODO check DONE add single photo and continunous photo toggles (end of progress line)
+#TODO check DONE add repeat mode for point and shoot
+#TODO check DONE add park button to unwind to encoder 0,0 for cable wrap management (home button turns into this after homed, will need to restart program to home again)
 
 #tool to align telescope images for stitching: https://astroalign.quatrope.org/en/latest/
 
@@ -322,6 +323,10 @@ def initialize_config():
     config.el_speed = 0 #counts/sec
     config.az_current = 0 #current draw in 10 mA increments
     config.el_current = 0
+    config.sleep_settle_time = 1 #seconds to sleep for settling after reaching target
+    config.is_homed = False
+    config.home_az = 0 #store the home location for the park function
+    config.home_el = 0 #store the home location for the park function
     
     config.sec_between_photos = 1 #time between photos for continuous photos in camera_control
     config.take_photo = False #tells camera_control to take a single photo
@@ -606,7 +611,7 @@ async def run_telescope(root):
             root.el_PV.text = str("%07.3f" % config.el_angle_PV) + ' (' + str("%08.3f" % config.el_pointing_error) + ')' #update the angle display
 
             #perform commands
-            root.state_label.text = 'config.state = ' + config.state
+            root.state_label.text = config.state
             if config.state == 'idle':
                 #update our stats
                 root.current_target_stats.text='Current target: None'
@@ -714,14 +719,21 @@ async def run_telescope(root):
                     
             elif config.state == 'home':
                 print('Sending homing sequence')
+                #Enter into homing sequence in telescope_control (blocking)
+                stats, rc, address = telescope_control(rc, address=0x80, coord = [datetime.now(timezone.utc), config.az_angle_PV, config.el_angle_PV], cmd='home_motors') #stop the scope where it is
 
-                #send the home command
-                
+                config.is_homed = True
+                root.home.text='Park' #Change the button label for it's new function
+
+            elif config.state == 'park':
+                print('Sending parking sequence')
+                #Enter into homing sequence in telescope_control (blocking)
+                stats, rc, address = telescope_control(rc, address=0x80, coord = [datetime.now(timezone.utc), config.az_angle_PV, config.el_angle_PV], cmd='park') #stop the scope where it is
+
             elif config.state == 'point_and_shoot':
-                #bug: will not be able to access coord if still movign when start is triggered
-                
+                #TODO bug: will not be able to access coord if still movign when start is triggered
                 if config.az_in_position and  config.el_in_position:   #move to coordinate (first time will be in position because it isn't slewing somewhere)
-                    sleep(1) #let any jitter settle
+                    sleep(config.sleep_settle_time) #let any jitter settle
                     #take photo
                     if len(config.selected_target_coords)>0:    
                         coord = config.selected_target_coords.pop(0)
@@ -729,8 +741,12 @@ async def run_telescope(root):
                         stats, rc, address = telescope_control(rc, address=0x80,  cmd='move_az_el', coord = [coord.time, coord.az,coord.el], lookahead = False) #tell telescope to stop where it is
                     else:
                         #remove first photo (taken at start arbitrary position)
-                        config.state = 'idle'
-                        print('Done with point and shoot')
+                        if root.point_and_shoot_repeat_checkbox.active is True: #repeat switch is checked
+                            print('repeating point_and_shoot')
+                            root.point_and_shoot.trigger_action(0.1) #Call the point and shoot function again, argument is for how long button should be pressed
+                        else:
+                            config.state = 'idle'
+                            print('Done with point and shoot')
                 else:
                     try: #catch the first run where coord doesn't exist yet, but we want to not put in dummy starting points into the display
                         stats, rc, address = telescope_control(rc, address=0x80, coord = [datetime.now(timezone.utc), 0, 0, 0, 0], cmd='noop') #tell telescope to stop where it is
@@ -936,7 +952,7 @@ class MainScreen(BoxLayout):
             #print('User pressed enter in', instance)
             #coerce output to 0-360
             self.manual_Az.text = str( float(self.manual_Az.text) %360)
-            self.manual_El.text = str( float(self.manual_El.text) %360)
+            self.manual_El.text = str( max(0, min(90, float(self.manual_El.text))))
 
             print('Az : ' + self.manual_Az.text)
             print('El : ' + self.manual_El.text)
@@ -969,14 +985,14 @@ class MainScreen(BoxLayout):
 
         def plus_El_callback(instance):
             #self.manual_El.text = str(float(self.manual_El.text) + 1)
-            self.manual_El.text = str( max(0, min(180, float(self.manual_El.text) + 1)) )
+            self.manual_El.text = str( max(0, min(90, float(self.manual_El.text) + 1)) )
 
             print('The button <%s> is being pressed' % instance.text)
             self.manual_AzEl.trigger_action(0.1) # argument is for how long button should be pressed
 
         def minus_El_callback(instance):
             #self.manual_El.text = str(float(self.manual_El.text) - 1)
-            self.manual_El.text = str( max(0, min(180, float(self.manual_El.text) - 1)) )
+            self.manual_El.text = str( max(0, min(90, float(self.manual_El.text) - 1)) )
 
             print('The button <%s> is being pressed' % instance.text)
             self.manual_AzEl.trigger_action(0.1) # argument is for how long button should be pressed
@@ -1085,6 +1101,9 @@ class MainScreen(BoxLayout):
         self.point_and_shoot_FOV_layout.add_widget(Label(text = 'FOV deg'))
 
 
+        self.point_and_shoot_repeat_checkbox = CheckBox(active = True)
+        self.point_and_shoot_FOV_layout.add_widget(self.point_and_shoot_repeat_checkbox)
+        self.point_and_shoot_FOV_layout.add_widget(Label(text = 'Repeat PaS'))
 
         def enable_buttons(disable = True): #turns buttons on/off for tasks that take a long time e.g. compute targets     
             self.manual_Az.disabled = disable
@@ -1220,15 +1239,12 @@ class MainScreen(BoxLayout):
         self.engage_track.bind(on_release=engage_track_callback)
 
         def home_callback(instance):
-            #config.state = 'home'
-            
-            filename = datetime.now().strftime("%Y-%m-%d %H_%M_%S.%f")+".txt"
-            folder = '/Users/andrewmiller/telescope/logs'
-            with open(os.path.join(folder, filename), "w") as text_file:
-                header = ('datetime,az_SV_input,el_SV_input,az_SV,el_SV,az_PV,el_PV,az_dest_counts,el_dest_counts,az_speed_SV,el_speed_SV,az_speed_SV_counts,el_speed_SV_counts,config.az_pointing_error,config.el_pointing_error,lookahead' + '\n')
-                text_file.write(header)
-                text_file.write(config.log)
-            print('Done writing log')
+            #The home button turns into the park button after first use (to unwind cable wrap in use). Will need to restart program to re-home.
+            if config.is_homed is False:
+                config.state = 'home'
+            else:
+                config.state = 'park'
+
         self.home = Button(text='Home') #this is the main button for the dropdown (which contains other buttons and is hidden)
         self.home.bind(on_release=home_callback)
 
@@ -1237,7 +1253,13 @@ class MainScreen(BoxLayout):
             print('ok pressed')
             enable_buttons(disable = True)
 
-
+            filename = datetime.now().strftime("%Y-%m-%d %H_%M_%S.%f")+".txt"
+            folder = '/Users/andrewmiller/telescope/logs'
+            with open(os.path.join(folder, filename), "w") as text_file:
+                header = ('datetime,az_SV_input,el_SV_input,az_SV,el_SV,az_PV,el_PV,az_dest_counts,el_dest_counts,az_speed_SV,el_speed_SV,az_speed_SV_counts,el_speed_SV_counts,config.az_pointing_error,config.el_pointing_error,lookahead' + '\n')
+                text_file.write(header)
+                text_file.write(config.log)
+            print('Done writing log')
 
         def cancel_button(instance):
             print('cancel pressed')
@@ -1263,7 +1285,7 @@ class MainScreen(BoxLayout):
         self.checkbox_grid_layout = GridLayout(cols = 2)
         def on_auto_checkbox_active(checkbox, value):
             if value:
-                print('The checkbox', self.automanual_checkbox, 'is active')
+                print('The checkbox', self.automanual_checkbox, 'is active') #the value is read out by the tracking routine so checkbox is just storing a state. Callback for development handiness
             else:
                 print('The checkbox', self.automanual_checkbox, 'is inactive')
         self.automanual_checkbox = CheckBox(active = True, size_hint_x = 0.25)
@@ -1295,29 +1317,51 @@ class MainScreen(BoxLayout):
 ####        self.plot_window.height = 500 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
 ####        self.plot_window.width = 1000 #for reasons unknown have to put the plot in, then adjust the height or it breaks (plot becomes NoneType)
 
-        self.button_pressed = 0
         def button0_callback(instance):
-            self.button_pressed = 0
+            if config.exposure == 'auto':
+                config.exposure = 0
+            config.exposure = config.exposure + 1
+            print(config.exposure)
         def button1_callback(instance):
-            self.button_pressed = 1
+            if config.exposure == 'auto':
+                config.exposure = 0
+            config.exposure = config.exposure - 1
+            print(config.exposure)
         def button2_callback(instance):
-            self.button_pressed = 2
+            config.exposure = 'auto'
+            print(config.exposure)
         def button3_callback(instance):
-            self.button_pressed = 3
+            if config.focus == 'auto':
+                config.focus = 0
+            config.focus = config.focus + 1
+            print(config.focus)
         def button4_callback(instance):
-            self.button_pressed = 4
+            if config.focus == 'auto':
+                config.focus = 0
+            config.focus = config.focus - 1
+            print(config.focus)
+
         def button5_callback(instance):
-            self.button_pressed = 5
+            config.focus = 'auto'
+            print(config.focus)
+
         def button6_callback(instance):
-            self.button_pressed = 6
+            if config.whitebalance == 'auto':
+                config.whitebalance = 0
+            config.whitebalance = config.whitebalance + 1
+            print(config.whitebalance)
+
         def button7_callback(instance):
-            self.button_pressed = 7
+            if config.whitebalance == 'auto':
+                config.whitebalance = 0
+            config.whitebalance = config.whitebalance - 1
+            print(config.whitebalance)
         def button8_callback(instance):
-            self.button_pressed = 8
-        def button9_callback(instance):
-            self.button_pressed = 9
-
-
+            config.whitebalance = 'auto'
+            print(config.whitebalance)
+        def button9_callback(instance): #read out all global variables
+            var_names = [x for x in dir(config) if not x.startswith("__")]
+            [print(x + ' : ' +str(getattr(config, x))) for x in var_names]
 
 
 
@@ -1358,13 +1402,13 @@ class MainScreen(BoxLayout):
         self.continuous_photos = ToggleButton(text = 'Cont.')
         self.continuous_photos.bind(on_release = continuous_photos_callback)
         
-        
+
 
         
         self.az_PV.size_hint_x = 0.2
         self.el_PV.size_hint_x = 0.2
-        self.state_label.size_hint_x = 0.2
-        self.point_and_shoot_FOV_layout.size_hint_x = 0.2
+        self.state_label.size_hint_x = 0.1
+        self.point_and_shoot_FOV_layout.size_hint_x = 0.3
         
         self.top_box_row1.add_widget(self.az_PV)
         self.top_box_row1.add_widget(self.el_PV)
@@ -1422,24 +1466,23 @@ class MainScreen(BoxLayout):
         self.top_box_row6.add_widget(self.trackprogressbar) #(try to expand over 2 columns, labels as placeholders until then)
         self.top_box_row6.add_widget(self.single_photo)
         self.top_box_row6.add_widget(self.time_between_photos)
-        self.top_box_row6.add_widget(self.continuous_photos)
+        self.top_box_row6.add_widget(self.continuous_photos)            
 
 
 
-        # self.add_widget(Label(text='password'))
                 
         self.top_box_row7.add_widget(self.roboclaw_stats)
         self.top_box_row7.add_widget(self.iPhone_stats)
         button_size_hint = (1-0.4)/10
-        self.button0 = Button(text='0', size_hint_x = button_size_hint)
-        self.button1 = Button(text='1', size_hint_x = button_size_hint)
-        self.button2 = Button(text='2', size_hint_x = button_size_hint)
-        self.button3 = Button(text='3', size_hint_x = button_size_hint) 
-        self.button4 = Button(text='4', size_hint_x = button_size_hint)
-        self.button5 = Button(text='5', size_hint_x = button_size_hint)
-        self.button6 = Button(text='6', size_hint_x = button_size_hint)
-        self.button7 = Button(text='7', size_hint_x = button_size_hint)
-        self.button8 = Button(text='8', size_hint_x = button_size_hint)
+        self.button0 = Button(text='ex+', size_hint_x = button_size_hint)
+        self.button1 = Button(text='ex-', size_hint_x = button_size_hint)
+        self.button2 = Button(text='exA', size_hint_x = button_size_hint)
+        self.button3 = Button(text='f+', size_hint_x = button_size_hint) 
+        self.button4 = Button(text='f-', size_hint_x = button_size_hint)
+        self.button5 = Button(text='fA-', size_hint_x = button_size_hint)
+        self.button6 = Button(text='wb+', size_hint_x = button_size_hint)
+        self.button7 = Button(text='wb-', size_hint_x = button_size_hint)
+        self.button8 = Button(text='wbA', size_hint_x = button_size_hint)
         self.button9 = Button(text='9', size_hint_x = button_size_hint)
         self.top_box_row7.add_widget(self.button0)
         self.top_box_row7.add_widget(self.button1)

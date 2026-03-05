@@ -73,7 +73,7 @@ async def camera_control(root):
         else:
             ex = vid.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0)
             ex = vid.set(cv2.CAP_PROP_EXPOSURE, exposure)#I believe the values are negative power of 2, e.g. -4 would be 1/16
-        print('exposure set: ' +str(ex))
+        print('exposure set: ' + str(exposure) + ' success ' + str(ex))
     
         vid.set(cv2.CAP_PROP_BUFFERSIZE, 1) #keep only the most recent frame
         vid.set(cv2.CAP_PROP_FRAME_WIDTH, size[0])
@@ -85,9 +85,15 @@ async def camera_control(root):
     
         i = 0
         old_focus = '' #initialize
+        old_exposure = ''
+        old_whitebalance = ''
         last_photo = datetime.now(timezone.utc)
         photo = False
         attempt_focus = True #not all cameras support, so disable so timeout doesn't slow it down
+        attempt_exposure = True
+        attempt_whitebalance = True
+        
+        
         
         while(config.end_program is False):
             await trio.sleep(0.01) #checkpoint without blocking (e.g. GUI can operate now)
@@ -108,6 +114,32 @@ async def camera_control(root):
                 else:
                     attempt_focus = False
             
+            exposure = config.exposure #get the autoexposure or manual exposure value
+            if  old_exposure != exposure and attempt_exposure: #if change to exposure setting
+                if exposure == 'auto':
+                    exposure_success = vid.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1) # turn the autoexposure on
+                else: 
+                    exposure_success1 = vid.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0) # turn the autoexposure off
+                    exposure_success2 = vid.set(cv2.CAP_PROP_EXPOSURE , exposure)  #set the exposure,  min: 0, max: 255, increment:5
+                    exposure_success = exposure_success1 and exposure_success2
+                if exposure_success:
+                    old_exposure = exposure
+                else:
+                    attempt_exposure = False
+                    
+                    
+            whitebalance = config.whitebalance #get the autowhitebalance or manual whitebalance value
+            if  old_whitebalance != whitebalance and attempt_whitebalance: #if change to whitebalance setting
+                if whitebalance == 'auto':
+                    whitebalance_success = vid.set(cv2.CAP_PROP_AUTO_WB, 1) # turn the autowhitebalance on
+                else: 
+                    whitebalance_success1 = vid.set(cv2.CAP_PROP_AUTO_WB, 0) # turn the autowhitebalance off
+                    whitebalance_success2 = vid.set(cv2.CAP_PROP_TEMPERATURE , whitebalance)  #set the whitebalance,  min: 0, max: 255, increment:5
+                    whitebalance_success = whitebalance_success1 and whitebalance_success2
+                if whitebalance_success:
+                    old_whitebalance = whitebalance
+                else:
+                    attempt_whitebalance = False
             
             
             if config.take_photo:

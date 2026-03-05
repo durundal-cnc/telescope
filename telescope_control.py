@@ -32,7 +32,7 @@ def normalize_360(angle): #compute difference in angles with wraparound
 #def telescope_control(rc = '', cmd = 'noop', coord = [time_of_coords, az_SV, el_SV]): #arg names for reference
 def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.now(timezone.utc), 0.0, 0.0, 0.0, 0.0], lookahead = False):
 
-    robo_connected = False #use for debugging when roboclaw not connected
+    robo_connected = True #use for debugging when roboclaw not connected
     
 
     az_speed_max = 12 #deg/sec
@@ -311,150 +311,7 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
             #     el_encoder_value = el_encoder_value[1]
             #     print(str(az_encoder_value) + ' ' + str(el_encoder_value))
     
-    ##############testing
-        print('roboclaw init complete')
-        return stats, rc, address
-        if not robo_connected:
-            config.Bit1_az = 0 #testing only
-            config.Bit1_el = 0 #testing only
-            config.az_encoder_value = 0 #counts, replace with read function
-            config.el_encoder_value = 0 #counts, replace with read function
-            
-        if robo_connected:
-    
-            restore_defaults = True
-            reconnect = True
-            while reconnect:
-                print('Opening roboclaw USB com port')
-                #Windows comport name
-                #rc = Roboclaw("COM4",38400)
-                #Linux comport name
-                #rc = Roboclaw("/dev/tty.usbmodem1101",38400)
-                #rc = Roboclaw("/dev/tty.usbmodem212301",38400)
-                rc = Roboclaw("/dev/tty.usbmodem111201", 38400)
 
-                roboclaw_success = rc.Open()
-    
-                address = 0x80 #decimal 128
-            
-                version = rc.ReadVersion(address)
-                print(version)
-                if not roboclaw_success or not version[0]:
-                    print('Error opening roboclaw')
-                   # return
-                    
-                #initialize
-                if restore_defaults:
-                    rc.RestoreDefaults(address) #need to re-establish serial connection once using this
-                    restore_defaults = False
-                else:
-                    reconnect = False
-    
-    #this error means it's not plugged in to the USB: AttributeError: 'Roboclaw' object has no attribute '_port'
-    #the bus power to the roboclaw needs to be supplied after USB is plugged in, otherwise won't run
-            # # set M1 & M2 enc (to 2**32 = 4294967295 max range, but is signed))
-            print('Setting encoder to 0')
-            #rc.SetEncM1(address,int(2**32/2)) #Not sure how/if Roboclaw handles encoder wraparound. Might need to reset encoder value as it nears either side evenutally
-            #rc.SetEncM2(address,int(2**32/2))
-            rc.SetEncM1(address,0) #Not sure how/if Roboclaw handles encoder wraparound. Might need to reset encoder value as it nears either side evenutally
-            rc.SetEncM2(address,0)
-            
-            print('Setting encoder directions')
-            rc.SetM1EncoderMode(address, int('00100000', 2)) #reverse motor relative direction direction int('00100000', 2))
-            rc.SetM2EncoderMode(address, int('00000000', 2)) #may need to adjust depending on how final wiring goes (so positive encoder and positive angle match)
-            
-            # # set M1&M2 max amps #stall current 5600mA, 10mA units for current limit
-            print('Setting max current')
-            rc.SetM1MaxCurrent(address,5000) # Current value is in 10ma units. To calculate multiply current limit by 10.
-            rc.SetM2MaxCurrent(address,5000)
-            
-            #voltage limit setting in python doesn't seem to work
-            #rc.SetMainVoltages(address, 130, 110) #100mV increments
-            #rc.SetMaxVoltageMainBattery(address, 66) #volts * 5.12 #this doesn't work in python but does work on their motion application
-            #rc.SetMinVoltageMainBattery(address, 25) #(volts-6)*5=val
-            
-            #configure limit switches
-            #S3 0x01 = E-stop
-            #S4,S5:
-            #home(user) = 0x62
-            #home(auto) = 0xE2
-            #Home(Auto)/Limit(Fwd) = 0xF2
-            #Home(User)/Limit(Fwd) = 0x72
-            #Limit(Rev) = 0x22
-            #Limit(Fwd) = 0x12
-            #Limit(Both) = 0x32
-            print('read pin functions')
-            rc.ReadPinFunctions(address)
-            print('set pin functions')
-            rc.SetPinFunctions(address, 0x01, 0x72, 0x72) #S3 is e-stop, home only for az, home and limits for el
-    
-            print('Set velocity PID to 0')
-            rc.SetM1VelocityPID(address, 0x00000000, 0x00000000, 0x00000000, 256875) #QPPS set by measuring motor velocity open loop, PID here defaults
-            rc.SetM2VelocityPID(address, 0x00000000, 0x00000000, 0x00000000, 256875) #QPPS set by measuring motor velocity open loop, PID here defaults
-            #have to set the velocity PID terms to zero or it enables a cascaded PIV-D loop. Roboclaw defaults to having some terms in the velocity loop
-    #open loop speed seems to max out at 30000 but has significant variability there - down to 20k, averaging maybe 25k
-    #QPPS from PIV autotune = 102187
-    
-    #these probably need to be re-evaluated after the drives have been run in a bit
-    
-            # # get M1POS PID [D(4 bytes), P(4 bytes), I(4 bytes), MaxI(4 bytes),Deadzone(4 bytes), MinPos(4 bytes), MaxPos(4 bytes)]
-            print('Read position PID')
-            rc.ReadM1PositionPID(address)
-            # # set M1POS PID
-            P = 39 #starting values from autotune in motion studio, for harmonic drives by their lonesome
-            I = 2
-            D = 540
-            deadzone = 4
-            max_I = 2617
-            min_pos = -1073741824 #this is the minimum encoder position (doesn't roll over here, just stops)
-            max_pos = 1073741824
-            print('Set position PID')
-            rc.SetM1PositionPID(address, P, I, D, max_I, deadzone, min_pos, max_pos)
-            
-            # # get M2POS PID
-            print('Read position PID')
-            print(rc.ReadM2PositionPID(address))
-            # # set M2POS PID
-            P = 39 #starting values from autotune in motion studio, for harmonic drives by their lonesome
-            I = 2
-            D = 540
-            deadzone = 0
-            max_I = 2617
-            min_pos = -1073741824 #negative values here seem to cause undefined behavior (though not in motion studio? Or maybe only if out of range?)
-            max_pos = 1073741824
-            print('Set position PID')
-            rc.SetM2PositionPID(address, P, I, D, max_I, deadzone, min_pos, max_pos)
-            
-            # stats = 'this is the roboclaw stats pull'
-            print('Read errors in roboclaw registers')
-            status = rc.ReadError(address)[0]
-            status_list = [{'Normal' : status & 0x000000},
-            {'E_Stop' : status & 0x000001}, #this always seems to be set?
-            {'Temperature_Error' : status & 0x000002},
-            {'Temperature_2_Error' : status & 0x000004},
-            {'Main_Voltage_High_Error' : status & 0x000008},
-            {'Logic_Voltage_High_Error' : status & 0x000010},
-            {'Logic_Voltage_Low_Error' : status & 0x000020},
-            {'M1_Driver_Fault_Error' : status & 0x000040},
-            {'M2_Driver_Fault_Error' : status & 0x000080},
-            {'M1_Speed_Error' : status & 0x000100},
-            {'M2_Speed_Error' : status & 0x000200},
-            {'M1_Position_Error' : status & 0x000400},
-            {'M2_Position_Error' : status & 0x000800},
-            {'M1_Current_Error' : status & 0x001000},
-            {'M2_Current_Error' : status & 0x002000},
-            {'M1_Over_Current_Warning' : status & 0x010000},
-            {'M2_Over_Current_Warning' : status & 0x020000},
-            {'Main_Voltage_High_Warning' : status & 0x040000},
-            {'Main_Voltage_Low_Warning' : status & 0x080000},
-            {'Temperature_Warning' : status & 0x100000},
-            {'Temperature_2_Warning' : status & 0x200000},
-            {'S4_Signal_Triggered' : status & 0x400000},
-            {'S5_Signal_Triggered' : status & 0x800000},
-            {'Speed_Error_Limit_Warning' : status & 0x01000000},
-            {'Position_Error_Limit_Warning' : status & 0x02000000}]
-            [print(stat) for stat in status_list if list(stat.values())[0] != 0]
-            config.error_conds = status_list #store for display in the GUI
     #############testing
     
             # # rc.ReadEncoderModes(address)
@@ -611,8 +468,8 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
         print('homing motors')
         buffer = 1
         home_speed_counts = 5000
-        el_counts = rc.ReadEncM2(address)
-        max_counts = el_counts + el_counts_per_rev * (120/360) #stop after 120 degrees of motion
+        el_counts = rc.ReadEncM2(address)[1]
+        max_counts = int(round(el_counts + el_counts_per_rev * (120/360))) #stop after 120 degrees of motion
         
         #move into elevation home first
         rc.SetPinFunctions(address, 1, 0, 2) #S3 is e-stop, home only for az, home and limits for el
@@ -628,12 +485,13 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
         print('Out of El home sequence')
         rc.DutyM2(address, 0) #stop motor
 
-
+        get_roboclaw_registers(rc, address) #verify S5 home register set on roboclaw
+        
         #move into azimuth home
         rc.SetPinFunctions(address, 1, 2, 0) #S3 is e-stop, home only for az, home and limits for el
         home_speed_counts = 5000
-        az_counts = rc.ReadEncM1(address)
-        max_counts = az_counts + az_counts_per_rev * (380/360) #stop after 380 degrees of motion
+        az_counts = rc.ReadEncM1(address)[1]
+        max_counts = int(round(az_counts + az_counts_per_rev * (380/360))) #stop after 380 degrees of motion
 
         #drive into switch
         rc.SpeedAccelDeccelPositionM1(address, az_accel, home_speed_counts, az_deccel, max_counts, buffer) #(address, accel, speed, deccel, position, buffer)
@@ -646,9 +504,16 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
             #update values in GUI
         print('Out of Az home sequence')
         rc.DutyM1(address, 0) #stop motor
-
+        
+        get_roboclaw_registers(rc, address) #verify S4 home register set on roboclaw
+        
         #set to E-stop, no function on other pins
-        rc.SetPinFunctions(address, 1, 0, 0) #S3 is e-stop, home only for az, home and limits for el
+        rc.SetPinFunctions(address, 0, 0, 0) #S3 is e-stop, no function for az/el
+
+        
+        config.home_az = rc.ReadEncM1(address)[1] #store the encoder positions for parking
+        config.home_el = rc.ReadEncM2(address)[1] #store the encoder positions for parking
+        
         print('Done with homing, e-stop enabled and home switches disabled')
         #Home motors
             #rotate into sensors at constant velocity
@@ -656,6 +521,10 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
             #move to pulse location
             #set encoder to 0
         return stats, rc, address
+
+    elif cmd == 'park': #no op
+        az_dest_counts = config.home_az #these are the encoder positions at the home location
+        el_dest_counts = config.home_el
 
     elif cmd == 'noop': #no op
         az_dest_counts = az_SV * az_counts_per_rev / 360 #this will always be 0-360 degrees from the trajectory planner
@@ -873,7 +742,7 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
                          + str(config.az_pointing_error) + ',' + str(config.el_pointing_error) + ',' + str(lookahead) + '\n')
 
 
-            if cmd == 'home_motors' or cmd == 'move_az_el' or cmd == 'hold': 
+            if cmd == 'home_motors' or cmd == 'park' or cmd == 'move_az_el' or cmd == 'hold': 
                 
                 rc.SpeedAccelDeccelPositionM1(address, az_accel, az_speed_SV_counts, az_deccel, az_dest_counts, buffer) #(address, accel, speed, deccel, position, buffer)
                 rc.SpeedAccelDeccelPositionM2(address, el_accel, el_speed_SV_counts, el_deccel, el_dest_counts, buffer)
