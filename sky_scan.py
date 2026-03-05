@@ -42,6 +42,7 @@ elif os.name == 'posix':
     sys.path.append(r'/Users/andrewmiller/telescope/roboclaw_python')
     root_name = r'/Users/andymiller/telescope'
 
+from pathlib import Path
 
 
 #my functions
@@ -140,15 +141,15 @@ keep_running_app = True
 #DONE function to add: for location in sky, find objects within https://eteq-astropy.readthedocs.io/en/latest/coordinates/matchsep.html
 
 #handle can't-find-object case gracefully (crashes out now)
-#install limit switches and get home function working
+#DONE install limit switches and get home function working
 #DONE adjust elevation from 0-180 to -90 to +90 for skycoordinate compatibility (? unsure how this is supposed to work)
 #DONE Elevation SV value below 0 goes negative (no wraparound code), causes issue when halt telescope called (big swing to those coordinates)
 #DONE make pressing teh RA/DEC a button that populates the star chart
 #TODO check DONE check that point and shoot can handle wraparound on az ok (e.g. start at 1 deg and go to 359 deg without spinning around)
 #TODO check DONE add single photo and continunous photo toggles (end of progress line)
 #TODO check DONE add repeat mode for point and shoot
-#TODO check DONE add park button to unwind to encoder 0,0 for cable wrap management (home button turns into this after homed, will need to restart program to home again)
-
+#DONE add park button to unwind to encoder 0,0 for cable wrap management (home button turns into this after homed, will need to restart program to home again)
+#cap El stage to 0-90 PV for point and shoot (if dithers to 360.0001 it will take that)
 #tool to align telescope images for stitching: https://astroalign.quatrope.org/en/latest/
 
 def get_ra_dec(): #convert current alt-az angle to right ascension and declination
@@ -314,6 +315,8 @@ def initialize_config():
     config.camera_ready = False
     config.az_encoder_value = 0 #counts
     config.el_encoder_value = 0 #counts
+    config.az_dest_counts = 0 #counts
+    config.el_dest_counts = 0 #counts
     config.az_pointing_error = 0 #degrees
     config.el_pointing_error = 0 #degrees
     config.total_pointing_error = 0 #degrees
@@ -724,20 +727,29 @@ async def run_telescope(root):
 
                 config.is_homed = True
                 root.home.text='Park' #Change the button label for it's new function
+                config.state = 'idle'
 
             elif config.state == 'park':
                 print('Sending parking sequence')
                 #Enter into homing sequence in telescope_control (blocking)
                 stats, rc, address = telescope_control(rc, address=0x80, coord = [datetime.now(timezone.utc), config.az_angle_PV, config.el_angle_PV], cmd='park') #stop the scope where it is
+                config.state = 'idle'
 
             elif config.state == 'point_and_shoot':
                 #TODO bug: will not be able to access coord if still movign when start is triggered
+                
                 if config.az_in_position and  config.el_in_position:   #move to coordinate (first time will be in position because it isn't slewing somewhere)
-                    sleep(config.sleep_settle_time) #let any jitter settle
-                    #take photo
+                    start_settle = datetime.now(timezone.utc) + timedelta(seconds = config.sleep_settle_time) #let settle
+                    while datetime.now(timezone.utc) < start_settle: #update parameters while waiting
+                        stats, rc, address = telescope_control(rc, address=0x80, coord = [datetime.now(timezone.utc), 0, 0, 0, 0], cmd='noop') #tell telescope to stop where it is
+
+                    #sleep(config.sleep_settle_time) #let any jitter settle
+                    #tell camera thread to take photo
+                    config.take_photo = True
                     if len(config.selected_target_coords)>0:    
                         coord = config.selected_target_coords.pop(0)
                         print('heading to ' + str(coord.az) + ',' + str(coord.el))
+                        root.console.text = str(coord)
                         stats, rc, address = telescope_control(rc, address=0x80,  cmd='move_az_el', coord = [coord.time, coord.az,coord.el], lookahead = False) #tell telescope to stop where it is
                     else:
                         #remove first photo (taken at start arbitrary position)
@@ -749,7 +761,8 @@ async def run_telescope(root):
                             print('Done with point and shoot')
                 else:
                     try: #catch the first run where coord doesn't exist yet, but we want to not put in dummy starting points into the display
-                        stats, rc, address = telescope_control(rc, address=0x80, coord = [datetime.now(timezone.utc), 0, 0, 0, 0], cmd='noop') #tell telescope to stop where it is
+                        #this command needs to have the coord.az and coord.el sent or else it doesn't know how to calculate the in_position values
+                        stats, rc, address = telescope_control(rc, address=0x80, coord = [datetime.now(timezone.utc), coord.az, coord.el, 0, 0], cmd='noop') #tell telescope to stop where it is
                         #print('Az error: '+ str(config.az_pointing_error) + 'el error: ' + str(config.el_pointing_error))
                         continue
                     except:
@@ -1072,8 +1085,10 @@ class MainScreen(BoxLayout):
             self.time_of_individual_tracks, self.name_of_individual_tracks, self.individual_tracks = compute_target_coords(target_list=[['user_defined_pos', 'point_and_shoot']]) #default parameters used for point and shoot (start/end coords kept in config file)
             print('length of self.individual_tracks ' + str(len(self.individual_tracks)))
             print(self.individual_tracks)
-            config.selected_target_coords = self.individual_tracks['point_and_shoot_target_name']
+            config.selected_target_coords = self.individual_tracks['point_and_shoot_target_name'] #load the point and shoot coordinates into the track list
+            self.tracks_display.text = str(self.individual_tracks) #store the tracks for viewing
             config.state = 'point_and_shoot'
+
         self.point_and_shoot.bind(on_release=point_and_shoot_callback)
         
         self.point_and_shoot_start = Button(text='PaS start')
@@ -1101,7 +1116,7 @@ class MainScreen(BoxLayout):
         self.point_and_shoot_FOV_layout.add_widget(Label(text = 'FOV deg'))
 
 
-        self.point_and_shoot_repeat_checkbox = CheckBox(active = True)
+        self.point_and_shoot_repeat_checkbox = CheckBox(active = False)
         self.point_and_shoot_FOV_layout.add_widget(self.point_and_shoot_repeat_checkbox)
         self.point_and_shoot_FOV_layout.add_widget(Label(text = 'Repeat PaS'))
 
@@ -1244,6 +1259,8 @@ class MainScreen(BoxLayout):
                 config.state = 'home'
             else:
                 config.state = 'park'
+                self.manual_Az.text = '0.0'
+                self.manual_El.text = '0.0'
 
         self.home = Button(text='Home') #this is the main button for the dropdown (which contains other buttons and is hidden)
         self.home.bind(on_release=home_callback)
@@ -1254,7 +1271,9 @@ class MainScreen(BoxLayout):
             enable_buttons(disable = True)
 
             filename = datetime.now().strftime("%Y-%m-%d %H_%M_%S.%f")+".txt"
-            folder = '/Users/andrewmiller/telescope/logs'
+            folder = os.path.join(root_name, 'logs')
+            Path(folder).mkdir(parents=True, exist_ok=True)
+
             with open(os.path.join(folder, filename), "w") as text_file:
                 header = ('datetime,az_SV_input,el_SV_input,az_SV,el_SV,az_PV,el_PV,az_dest_counts,el_dest_counts,az_speed_SV,el_speed_SV,az_speed_SV_counts,el_speed_SV_counts,config.az_pointing_error,config.el_pointing_error,lookahead' + '\n')
                 text_file.write(header)
@@ -1348,7 +1367,7 @@ class MainScreen(BoxLayout):
         def button6_callback(instance):
             if config.whitebalance == 'auto':
                 config.whitebalance = 0
-            config.whitebalance = config.whitebalance + 1
+            config.whitebalance = config.whitebalance + 100
             print(config.whitebalance)
 
         def button7_callback(instance):
@@ -1360,6 +1379,7 @@ class MainScreen(BoxLayout):
             config.whitebalance = 'auto'
             print(config.whitebalance)
         def button9_callback(instance): #read out all global variables
+            print('*********************')
             var_names = [x for x in dir(config) if not x.startswith("__")]
             [print(x + ' : ' +str(getattr(config, x))) for x in var_names]
 

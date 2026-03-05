@@ -46,6 +46,10 @@ def point_and_shoot(my_locs, FOV = 1, slew_speed = 5): #units degrees, degrees/s
     az_end = config.point_and_shoot_end[0]
     el_start = config.point_and_shoot_start[1]
     el_end = config.point_and_shoot_end[1]
+    #coerce el start and end to be 0-90 (ditehr can happen on encoders to toss them past)
+    el_start = max(0, min(90, el_end))
+    el_start = max(0, min(90, el_end))
+
     
     if az_start == az_end and el_start == el_end:
         #return a single coordinate for a single photo there
@@ -64,13 +68,15 @@ def point_and_shoot(my_locs, FOV = 1, slew_speed = 5): #units degrees, degrees/s
     
     el_dist = el_end-el_start
     
-    az_step_num = math.ceil(az_dist/(FOV)) #how many steps to take
-    el_step_num = math.ceil(el_dist/(FOV))
+    az_step_num = max(1,math.ceil(az_dist/(FOV))) #how many steps to take, minimum of one
+    el_step_num = max(1,math.ceil(el_dist/(FOV))) 
+
     az_step_size = az_dist/az_step_num
     el_step_size = el_dist/el_step_num
     
     az_coords = [(az_start + x*az_step_size*dir_sign)%360 for x in range(az_step_num+1)] #+1 because we want photos at the endpoints on both sides
     el_coords = [el_start + x*el_step_size for x in range(el_step_num+1)]
+    #coerce to 0-90 deg (in case starts off on 360.001 encoder dither)
 
     target_time_az_el_list = []
 
@@ -80,7 +86,7 @@ def point_and_shoot(my_locs, FOV = 1, slew_speed = 5): #units degrees, degrees/s
     for el in el_coords: #ADD: need to relate steps to FOV for decent coverage with overlaps for stitching
         for az in az_coords:            
             print('Computed coord ['+ str(x) +','+ str(y) + '] at ' + str(az) + ','+ str(el))
-            t = datetime.now(timezone.utc) + timedelta(seconds=2) #1 second to move, 1 to settle (in the execution code)? Or just ignore the timestamp in the execution code?
+            t = datetime.now(timezone.utc) #stored but not used (next command gets send after axes are settled)
             target_time_az_el_list.append(['point_and_shoot_target_name',t, az, el, slew_speed, slew_speed]) #the trailing 0 s are velocity placeholders, to be computed outside of this function
             x = x + 1
         y = y + 1

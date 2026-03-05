@@ -80,14 +80,14 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
     deadband_counts = 50
     az_backlash = 0 #needs measurement
     el_backlash = 0 #needs measurement
-    az_accel = 1000000 #counts/sec^2
+    az_accel = 500000 #counts/sec^2
     az_speed_SV_max = 40000#counts/sec #max is 240k
     #az_speed_SV = az_speed_SV * az_counts_per_rev * (1/360) #(deg/sec * counts/rev * 1rev/360 deg)
-    az_deccel = 1000000#counts/sec^2
-    el_accel = 1000000#counts/sec^2
+    az_deccel = 500000#counts/sec^2
+    el_accel = 500000#counts/sec^2
     el_speed_SV_max = 40000#counts/sec
     #el_speed_SV = el_speed_SV * el_counts_per_rev * (1/360)
-    el_deccel = 1000000#counts/sec^2
+    el_deccel = 500000#counts/sec^2
 
 
 
@@ -102,7 +102,7 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
     def get_roboclaw_registers(rc, address):
         # stats = 'this is the roboclaw stats pull'
         #print('Read errors in roboclaw registers')
-        status = rc.ReadError(address)[0]
+        status = rc.ReadError(address)[1]
         status_list = [{'Normal' : status & 0x000000},
         {'E_Stop' : status & 0x000001}, #this always seems to be set?
         {'Temperature_Error' : status & 0x000002},
@@ -128,9 +128,10 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
         {'S5_Signal_Triggered' : status & 0x800000},
         {'Speed_Error_Limit_Warning' : status & 0x01000000},
         {'Position_Error_Limit_Warning' : status & 0x02000000}]
-        stats = [stat for stat in status_list if list(stat.values())[0] != 0]
+        #stats = [stat for stat in status_list if list(stat.values())[0] != 0]
+        status_list = {k: v for d in status_list for k, v in d.items()} #merge list of individual dicts to single dict
         config.error_conds = status_list #store for display in the GUI
-        return stats
+        return status_list
 
     
     if cmd == 'init':
@@ -254,7 +255,7 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
             
             # stats = 'this is the roboclaw stats pull'
             print('Read errors in roboclaw registers')
-            status = rc.ReadError(address)[0]
+            status = rc.ReadError(address)[1]
             status_list = [{'Normal' : status & 0x000000},
             {'E_Stop' : status & 0x000001}, #this always seems to be set?
             {'Temperature_Error' : status & 0x000002},
@@ -465,6 +466,10 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
         #TODO: add something to move off of the switches if happened to start parked there
         #TODO: add home/park button swap on front panel (to park and unwind cable wrap on az/put el in a convenient spot)
         
+        
+#       1,98,98 is user home from basicmicro app
+#       1,2,2 is auto home
+        
         print('homing motors')
         buffer = 1
         home_speed_counts = 5000
@@ -472,15 +477,17 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
         max_counts = int(round(el_counts + el_counts_per_rev * (120/360))) #stop after 120 degrees of motion
         
         #move into elevation home first
-        rc.SetPinFunctions(address, 1, 0, 2) #S3 is e-stop, home only for az, home and limits for el
+        rc.SetPinFunctions(address, 2, 0, 2) #S3 is e-stop, home only for az, home and limits for el
         #drive into switch
         rc.SpeedAccelDeccelPositionM2(address, el_accel, home_speed_counts, el_deccel, max_counts, buffer) #(address, accel, speed, deccel, position, buffer)
         found_el_limit = False
-        while el_counts <= max_counts or found_el_limit:
-            el_counts = rc.ReadEncM2(address)
+        while el_counts <= max_counts:
+            get_roboclaw_registers(rc, address) #verify S5 home register set on roboclaw
+            el_counts = rc.ReadEncM2(address)[1]
             stats = get_roboclaw_registers(rc, address)
             if stats['S5_Signal_Triggered'] != 0:
                 found_el_limit = True
+                break
             #update values in GUI
         print('Out of El home sequence')
         rc.DutyM2(address, 0) #stop motor
@@ -496,11 +503,12 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
         #drive into switch
         rc.SpeedAccelDeccelPositionM1(address, az_accel, home_speed_counts, az_deccel, max_counts, buffer) #(address, accel, speed, deccel, position, buffer)
         found_az_limit = False
-        while az_counts <= max_counts or found_az_limit:
-            az_counts = rc.ReadEncM1(address)
+        while az_counts <= max_counts:
+            az_counts = rc.ReadEncM1(address)[1]
             stats = get_roboclaw_registers(rc, address)
             if stats['S4_Signal_Triggered'] != 0:
                 found_az_limit = True
+                break
             #update values in GUI
         print('Out of Az home sequence')
         rc.DutyM1(address, 0) #stop motor
@@ -511,8 +519,12 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
         rc.SetPinFunctions(address, 0, 0, 0) #S3 is e-stop, no function for az/el
 
         
-        config.home_az = rc.ReadEncM1(address)[1] #store the encoder positions for parking
-        config.home_el = rc.ReadEncM2(address)[1] #store the encoder positions for parking
+        config.home_az = 0 #store the encoder positions for parking (could add this in to all calcs instead of zeroing but don't see the point)
+        config.home_el = 0 #store the encoder positions for parking
+
+        rc.SetEncM1(address, 0) #set to zero (otherwise jerks around when zero encoder != 0 SV in angle)
+        rc.SetEncM2(address, 0)
+
         
         print('Done with homing, e-stop enabled and home switches disabled')
         #Home motors
@@ -527,8 +539,12 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
         el_dest_counts = config.home_el
 
     elif cmd == 'noop': #no op
-        az_dest_counts = az_SV * az_counts_per_rev / 360 #this will always be 0-360 degrees from the trajectory planner
-        el_dest_counts = el_SV * el_counts_per_rev / 360 #this will always be 0-180 degrees from the trajectory planner
+    #TODO need to account for negative encoder values here (e.g. encoder 0, az_SV goest to 358, encoder is like -2000, dest_counts is like 1000000)
+        az_dest_counts = config.az_dest_counts
+        el_dest_counts = config.el_dest_counts
+    
+        #az_dest_counts = az_SV * az_counts_per_rev / 360 #this will always be 0-360 degrees from the trajectory planner
+        #el_dest_counts = el_SV * el_counts_per_rev / 360 #this will always be 0-180 degrees from the trajectory planner
         #keep the dest_counts so the in position check can run
         #pass
 
@@ -714,6 +730,9 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
         el_speed_SV_counts = round(el_speed_SV_counts)
         az_dest_counts = round(az_dest_counts) #processes as a float but controller only does ints
         el_dest_counts = round(el_dest_counts)
+        config.az_dest_counts = az_dest_counts
+        config.el_dest_counts = el_dest_counts
+
 
         try:
             #check if we are where we are supposed to be close enough
@@ -743,7 +762,6 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
 
 
             if cmd == 'home_motors' or cmd == 'park' or cmd == 'move_az_el' or cmd == 'hold': 
-                
                 rc.SpeedAccelDeccelPositionM1(address, az_accel, az_speed_SV_counts, az_deccel, az_dest_counts, buffer) #(address, accel, speed, deccel, position, buffer)
                 rc.SpeedAccelDeccelPositionM2(address, el_accel, el_speed_SV_counts, el_deccel, el_dest_counts, buffer)
         else:

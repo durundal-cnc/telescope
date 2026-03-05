@@ -36,7 +36,8 @@ async def camera_control(root):
         #import matplotlib.pyplot as plt
         
         #get camera number
-        camera = 0
+        camera = 1
+        print('using camera # ' + str(camera))
         whitebalance = 'auto'
         exposure = -4
         resolution = 'HD'
@@ -167,7 +168,11 @@ async def camera_control(root):
             
             # print('new process start'+ str(round(time.time() * 1000)))
             w, h, _ = frame.shape
-            buf = bytes(np.flipud(frame))
+            if camera == 0: #built in webcam on Dell laptop
+                buf = bytes(np.flipud(frame))
+            elif camera == 1: #Logi Brio
+                buf = bytes(frame)
+
             texture = Texture.create(size=(h, w))
             texture.blit_buffer(buf, colorfmt='rgb', bufferfmt='ubyte')
             # print('new process end'+ str(round(time.time() * 1000)))
