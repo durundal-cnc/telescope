@@ -167,11 +167,18 @@ async def camera_control(root):
             # print('byte_io end'+ str(round(time.time() * 1000)))
             
             # print('new process start'+ str(round(time.time() * 1000)))
+            
+            #cheater crop for webcam
             w, h, _ = frame.shape
+
+            frame2 = frame[w//2-w//4:w//2+w//4, h//2-h//4:h//2+h//4,:]
+
+            w, h, _ = frame2.shape
+
             if camera == 0: #built in webcam on Dell laptop
-                buf = bytes(np.flipud(frame))
+                buf = bytes(np.flipud(frame2))
             elif camera == 1: #Logi Brio
-                buf = bytes(frame)
+                buf = bytes(frame2)
 
             texture = Texture.create(size=(h, w))
             texture.blit_buffer(buf, colorfmt='rgb', bufferfmt='ubyte')

@@ -185,7 +185,7 @@ def satellite_tracking(my_locs, target_name = 'ISS', timespacing = timedelta(sec
     # from astropy.time import Time, TimeDelta, TimeDeltaSec
 
     #load local copy of NORAD satellite list and find NORAD catid by name
-    norad = pd.read_csv(r'/Users/andrewmiller/telescope/satcat.csv')
+    norad = pd.read_csv(r'C:\users\andym\telescope\satcat.csv')
     #if target_name is only digits assume this is the NORAD catalog ID
     target_name_original = target_name
     target_name = target_name.upper() #NORAD catalog is allcaps

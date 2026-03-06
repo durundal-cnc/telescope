@@ -80,14 +80,14 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
     deadband_counts = 50
     az_backlash = 0 #needs measurement
     el_backlash = 0 #needs measurement
-    az_accel = 500000 #counts/sec^2
-    az_speed_SV_max = 40000#counts/sec #max is 240k
+    az_accel = 50000 #counts/sec^2
+    az_speed_SV_max = 20000#counts/sec #max is 240k
     #az_speed_SV = az_speed_SV * az_counts_per_rev * (1/360) #(deg/sec * counts/rev * 1rev/360 deg)
-    az_deccel = 500000#counts/sec^2
-    el_accel = 500000#counts/sec^2
-    el_speed_SV_max = 40000#counts/sec
+    az_deccel = 50000#counts/sec^2
+    el_accel = 50000#counts/sec^2
+    el_speed_SV_max = 20000#counts/sec
     #el_speed_SV = el_speed_SV * el_counts_per_rev * (1/360)
-    el_deccel = 500000#counts/sec^2
+    el_deccel = 50000#counts/sec^2
 
 
 
@@ -157,7 +157,7 @@ def telescope_control(rc = '', address = 0x80, cmd = 'noop', coord = [datetime.n
                 #rc = Roboclaw("/dev/tty.usbmodem1101",38400)
                 #rc = Roboclaw("/dev/tty.usbmodem212301",38400)
                 if os.name == 'nt': #Windows 11
-                    rc = Roboclaw("COM5",38400)
+                    rc = Roboclaw("COM4",38400)
                 elif os.name == 'posix':
                     rc = Roboclaw("/dev/tty.usbmodem111201", 38400)
 

@@ -151,6 +151,8 @@ keep_running_app = True
 #DONE add park button to unwind to encoder 0,0 for cable wrap management (home button turns into this after homed, will need to restart program to home again)
 #cap El stage to 0-90 PV for point and shoot (if dithers to 360.0001 it will take that)
 #tool to align telescope images for stitching: https://astroalign.quatrope.org/en/latest/
+#optimize layout for laptop full screen
+#camera orientation depends on rotation of webcam- need to lock down or replace with mightex
 
 def get_ra_dec(): #convert current alt-az angle to right ascension and declination
     current_time = Time(datetime.now(timezone.utc)) #have to make sure datetime is in utc for all the astro tools unless you specify it in them indivudally
@@ -339,9 +341,9 @@ def initialize_config():
     config.whitebalance = 'auto'
     config.focus = 'auto'
     
-    config.point_and_shoot_start = 0
-    config.point_and_shoot_end = 0
-    config.point_and_shoot_FOV = 1 #field of view in degreees
+    config.point_and_shoot_start = [0,0] #pairs of az,el
+    config.point_and_shoot_end = [0,0]
+    config.point_and_shoot_FOV = 0.5 #field of view in degreees
     
 
     config.x = 0 #use for quit debugging
@@ -737,7 +739,8 @@ async def run_telescope(root):
 
             elif config.state == 'point_and_shoot':
                 #TODO bug: will not be able to access coord if still movign when start is triggered
-                
+                i = 0
+                num_shots = len(config.selected_target_coords)
                 if config.az_in_position and  config.el_in_position:   #move to coordinate (first time will be in position because it isn't slewing somewhere)
                     start_settle = datetime.now(timezone.utc) + timedelta(seconds = config.sleep_settle_time) #let settle
                     while datetime.now(timezone.utc) < start_settle: #update parameters while waiting
@@ -748,8 +751,9 @@ async def run_telescope(root):
                     config.take_photo = True
                     if len(config.selected_target_coords)>0:    
                         coord = config.selected_target_coords.pop(0)
+                        i = i + 1
                         print('heading to ' + str(coord.az) + ',' + str(coord.el))
-                        root.console.text = str(coord)
+                        root.console.text = 'Shot # ' + str(i) + 'of ' + str(num_shots) + ' heading to ' + '\n' + str(coord)
                         stats, rc, address = telescope_control(rc, address=0x80,  cmd='move_az_el', coord = [coord.time, coord.az,coord.el], lookahead = False) #tell telescope to stop where it is
                     else:
                         #remove first photo (taken at start arbitrary position)
@@ -987,25 +991,25 @@ class MainScreen(BoxLayout):
 
         #manual control buttons
         def plus_Az_callback(instance):
-            self.manual_Az.text = str(float(self.manual_Az.text) + 1)
+            self.manual_Az.text = str(float(self.manual_Az.text) + config.point_and_shoot_FOV)
             print('The button <%s> is being pressed' % instance.text)
             self.manual_AzEl.trigger_action(0.1) # argument is for how long button should be pressed
 
         def minus_Az_callback(instance):
-            self.manual_Az.text = str(float(self.manual_Az.text) - 1)
+            self.manual_Az.text = str(float(self.manual_Az.text) - config.point_and_shoot_FOV)
             print('The button <%s> is being pressed' % instance.text)
             self.manual_AzEl.trigger_action(0.1) # argument is for how long button should be pressed
 
         def plus_El_callback(instance):
             #self.manual_El.text = str(float(self.manual_El.text) + 1)
-            self.manual_El.text = str( max(0, min(90, float(self.manual_El.text) + 1)) )
+            self.manual_El.text = str( max(0, min(90, float(self.manual_El.text) + config.point_and_shoot_FOV)) )
 
             print('The button <%s> is being pressed' % instance.text)
             self.manual_AzEl.trigger_action(0.1) # argument is for how long button should be pressed
 
         def minus_El_callback(instance):
             #self.manual_El.text = str(float(self.manual_El.text) - 1)
-            self.manual_El.text = str( max(0, min(90, float(self.manual_El.text) - 1)) )
+            self.manual_El.text = str( max(0, min(90, float(self.manual_El.text) - config.point_and_shoot_FOV)) )
 
             print('The button <%s> is being pressed' % instance.text)
             self.manual_AzEl.trigger_action(0.1) # argument is for how long button should be pressed
@@ -1094,13 +1098,13 @@ class MainScreen(BoxLayout):
         self.point_and_shoot_start = Button(text='PaS start')
         def point_and_shoot_start_callback(instance):
             config.point_and_shoot_start = [config.az_angle_PV , config.el_angle_PV]
-            self.console.text = 'Point and shoot start = ' + str(config.az_angle_PV) + ',' + str(config.el_angle_PV) +'\n'
+            self.console.text = 'Point and shoot start = ' + str(config.point_and_shoot_start) +'\n' + 'Point and shoot end   = ' + str(config.point_and_shoot_end)
         self.point_and_shoot_start.bind(on_release=point_and_shoot_start_callback)
         
         self.point_and_shoot_end = Button(text='PaS end')
         def point_and_shoot_end_callback(instance):
             config.point_and_shoot_end = [config.az_angle_PV , config.el_angle_PV ]
-            self.console.text = self.console.text + 'Point and shoot end = ' + str(config.az_angle_PV) + ',' + str(config.el_angle_PV) + '\n'
+            self.console.text = 'Point and shoot start = ' + str(config.point_and_shoot_start) +'\n' + 'Point and shoot end   = ' + str(config.point_and_shoot_end)
 
         self.point_and_shoot_end.bind(on_release=point_and_shoot_end_callback)
 
@@ -1108,7 +1112,7 @@ class MainScreen(BoxLayout):
         def point_and_shoot_FOV_callback(instance):
             config.point_and_shoot_FOV = float(self.point_and_shoot_FOV.text)
         self.point_and_shoot_FOV = TextInput(hint_text='FOV degrees', input_filter = 'float', multiline=False, write_tab=False) #numeric only, tab moves to next object instead of writing \tab
-        self.point_and_shoot_FOV.text = "1"
+        self.point_and_shoot_FOV.text = str(config.point_and_shoot_FOV)
         self.point_and_shoot_FOV.bind(on_release=point_and_shoot_FOV_callback)
         
         self.point_and_shoot_FOV_layout = BoxLayout(orientation = 'horizontal')

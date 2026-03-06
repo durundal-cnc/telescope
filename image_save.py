@@ -11,6 +11,7 @@ import time
 import trio 
 from PIL import Image
 from pathlib import Path
+import numpy as np
 
 async def image_save(root):
     print('Starting image_save thread')
@@ -27,6 +28,8 @@ async def image_save(root):
         
         while len(config.photos) > 0:
             filename, frame = config.photos.pop(0)
+            frame = np.flipud(frame)
+            frame = np.fliplr(frame)
 
 
             # print('JPEG start'+ str(round(time.time() * 1000)))
